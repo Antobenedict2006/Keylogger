@@ -1,0 +1,9 @@
+psutil==5.9.8
+pywin32==306
+scikit-learn==1.4.2
+pandas==2.2.2
+numpy==1.26.4
+joblib==1.4.2
+plyer==2.1.0
+pystray==0.19.5
+Pillow==10.3.0

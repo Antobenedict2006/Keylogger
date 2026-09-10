@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.env
+venv/
+.venv/
+
+# Project runtime files
+logs/
+quarantine/
+models/*.joblib
+data/whitelist.json
+
+# SQLite
+*.db
+*.db-wal
+*.db-shm
