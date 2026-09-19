@@ -521,3 +521,256 @@ class DBLogger:
         except Exception:
             d["reasons"] = []
         return d
+
+# ===========================================================================
+# Behavior Recordings  (added for personalized-model training)
+# ===========================================================================
+
+# DDL appended to the existing schema on first use
+_BEHAVIOR_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS behavior_recordings (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id      TEXT     NOT NULL,   -- UUID for the recording session
+    recorded_at     REAL     NOT NULL,   -- Unix epoch float
+    process_name    TEXT     NOT NULL,
+    pid             INTEGER  NOT NULL,
+    exe_path        TEXT,
+    parent_name     TEXT,
+    features_json   TEXT     NOT NULL,   -- JSON object {feature_name: value}
+    label           TEXT     NOT NULL DEFAULT 'safe'
+);
+
+CREATE INDEX IF NOT EXISTS idx_behavior_session
+    ON behavior_recordings(session_id);
+
+CREATE INDEX IF NOT EXISTS idx_behavior_time
+    ON behavior_recordings(recorded_at);
+"""
+
+
+class BehaviorRecordingStore:
+    """
+    Thin wrapper around the existing DBLogger connection that persists
+    behavior-recording rows for the Train-Model feature.
+
+    Shares the same SQLite connection and RLock as the parent DBLogger so
+    all writes are serialized with the rest of the pipeline.
+
+    Usage::
+
+        store = BehaviorRecordingStore(db_logger)
+        store.ensure_schema()
+
+        store.save_recorded_process(session_id, process_data, features_dict)
+
+        df = store.export_to_dataframe(session_id)
+        store.export_to_csv(session_id, Path("data/my_behavior.csv"))
+
+        count = store.count_for_session(session_id)
+        store.delete_session(session_id)
+    """
+
+    def __init__(self, db_logger: "DBLogger") -> None:
+        # Borrow the connection and lock from the parent DBLogger so we
+        # never need a second connection to the same WAL-mode file.
+        self._db = db_logger
+
+    # ------------------------------------------------------------------
+    # Schema
+    # ------------------------------------------------------------------
+
+    def ensure_schema(self) -> None:
+        """Create the behavior_recordings table if it does not yet exist."""
+        try:
+            with self._db._lock:
+                self._db._conn.executescript(_BEHAVIOR_SCHEMA_SQL)
+                self._db._conn.commit()
+            logger.debug("BehaviorRecordingStore schema ensured.")
+        except Exception as exc:
+            logger.error("BehaviorRecordingStore schema error: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Write
+    # ------------------------------------------------------------------
+
+    def save_recorded_process(
+        self,
+        session_id: str,
+        process_data: Dict[str, Any],
+        features: Dict[str, float],
+        label: str = "safe",
+    ) -> None:
+        """
+        Persist one recorded process row.
+
+        Parameters
+        ----------
+        session_id   : UUID string identifying the recording session.
+        process_data : dict with keys: name, pid, exe_path, parent_name.
+        features     : {feature_name: value} for all 24 pipeline features.
+        label        : always "safe" for user-launched processes.
+        """
+        self._db._execute(
+            """
+            INSERT INTO behavior_recordings
+                (session_id, recorded_at, process_name, pid,
+                 exe_path, parent_name, features_json, label)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                time.time(),
+                process_data.get("name", ""),
+                process_data.get("pid", 0),
+                process_data.get("exe_path") or "",
+                process_data.get("parent_name") or "",
+                json.dumps(features),
+                label,
+            ),
+        )
+
+    # ------------------------------------------------------------------
+    # Read / export
+    # ------------------------------------------------------------------
+
+    def count_for_session(self, session_id: str) -> int:
+        """Return the number of rows stored for *session_id*."""
+        rows = self._db._fetchall(
+            "SELECT COUNT(*) FROM behavior_recordings WHERE session_id = ?",
+            [session_id],
+        )
+        return int(rows[0][0]) if rows else 0
+
+    def count_all(self) -> int:
+        """Return total rows across all sessions."""
+        rows = self._db._fetchall(
+            "SELECT COUNT(*) FROM behavior_recordings", []
+        )
+        return int(rows[0][0]) if rows else 0
+
+    def list_sessions(self) -> List[Dict[str, Any]]:
+        """
+        Return a summary list of recording sessions ordered newest-first.
+
+        Each entry: {session_id, sample_count, started_at, ended_at}
+        """
+        rows = self._db._fetchall(
+            """
+            SELECT session_id,
+                   COUNT(*)   AS sample_count,
+                   MIN(recorded_at) AS started_at,
+                   MAX(recorded_at) AS ended_at
+            FROM behavior_recordings
+            GROUP BY session_id
+            ORDER BY MAX(recorded_at) DESC
+            """,
+            [],
+        )
+        return [
+            {
+                "session_id":   r[0],
+                "sample_count": r[1],
+                "started_at":   r[2],
+                "ended_at":     r[3],
+            }
+            for r in rows
+        ]
+
+    def export_to_dataframe(self, session_id: Optional[str] = None):
+        """
+        Return a pandas DataFrame of recorded rows, optionally filtered
+        to *session_id*.
+
+        Columns: timestamp, process_name, pid, exe_path, parent_name,
+                 <24 feature columns>, label
+        """
+        try:
+            import pandas as pd  # local import — keep top-level lean
+        except ImportError:
+            raise RuntimeError(
+                "pandas is required for export_to_dataframe. "
+                "Install it with: pip install pandas"
+            )
+
+        if session_id:
+            rows = self._db._fetchall(
+                """
+                SELECT recorded_at, process_name, pid, exe_path,
+                       parent_name, features_json, label
+                FROM behavior_recordings
+                WHERE session_id = ?
+                ORDER BY recorded_at
+                """,
+                [session_id],
+            )
+        else:
+            rows = self._db._fetchall(
+                """
+                SELECT recorded_at, process_name, pid, exe_path,
+                       parent_name, features_json, label
+                FROM behavior_recordings
+                ORDER BY recorded_at
+                """,
+                [],
+            )
+
+        if not rows:
+            return pd.DataFrame()
+
+        records = []
+        for (recorded_at, proc_name, pid, exe_path,
+             parent_name, features_json, label) in rows:
+            try:
+                feats = json.loads(features_json)
+            except Exception:
+                feats = {}
+            row = {
+                "timestamp":    time.strftime(
+                    "%Y-%m-%d %H:%M:%S", time.localtime(recorded_at)
+                ),
+                "process_name": proc_name,
+                "pid":          pid,
+                "exe_path":     exe_path or "",
+                "parent_name":  parent_name or "",
+            }
+            row.update(feats)
+            row["label"] = label
+            records.append(row)
+
+        return pd.DataFrame(records)
+
+    def export_to_csv(
+        self,
+        filepath: Path,
+        session_id: Optional[str] = None,
+    ) -> int:
+        """
+        Write recorded rows to *filepath* as a CSV.
+
+        Returns the number of rows written.
+        Raises RuntimeError if pandas is not available or no rows exist.
+        """
+        df = self.export_to_dataframe(session_id=session_id)
+        if df.empty:
+            raise RuntimeError("No behavior recordings found to export.")
+
+        filepath = Path(filepath)
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(filepath, index=False)
+        logger.info(
+            "Exported %d behavior-recording rows to %s", len(df), filepath
+        )
+        return len(df)
+
+    def delete_session(self, session_id: str) -> int:
+        """Delete all rows for *session_id*. Returns deleted count."""
+        rows_before = self.count_for_session(session_id)
+        self._db._execute(
+            "DELETE FROM behavior_recordings WHERE session_id = ?",
+            (session_id,),
+        )
+        logger.info(
+            "Deleted %d behavior-recording rows for session %s",
+            rows_before, session_id,
+        )
+        return rows_before

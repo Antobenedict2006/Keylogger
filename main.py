@@ -50,7 +50,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.monitor          import ProcessMonitor, ProcessSnapshot
 from src.feature_extractor import FeatureExtractor, FeatureVector
 from src.classifier        import KeyloggerClassifier, RiskLevel
-from src.alert_manager     import AlertManager, ActionResult, ResponseAction
+from src.alert_manager     import AlertManager, ActionResult, ResponseAction, _send_desktop_notification
 from src.db_logger         import DBLogger
 
 # ---------------------------------------------------------------------------
@@ -223,12 +223,17 @@ class DetectionPipeline:
 
     def model_status(self) -> str:
         if self._classifier.using_ml_model:
+            kind = (
+                "Personalized model active"
+                if self._classifier.is_personalized_model()
+                else "Generic ML model active"
+            )
             return (
-                f"ML model active (v{self._classifier.model_version})  |  "
+                f"✅ {kind} (v{self._classifier.model_version})  |  "
                 f"scans={self._scan_count}  threats={self._threat_count}"
             )
         return (
-            f"Heuristic mode (no trained model loaded)  |  "
+            f"ℹ️ Heuristic mode (no trained model loaded)  |  "
             f"scans={self._scan_count}  threats={self._threat_count}"
         )
 
@@ -374,7 +379,21 @@ def main() -> int:
                 get_model_status=pipeline.model_status,
                 on_pause=_on_pause,
                 on_quit=_on_quit,
+                get_classifier=lambda: classifier,   # NEW: lets Train tab reload model
             )
+            
+            # Wire notification toggle to alert manager
+            # We'll monkey-patch the notification sender to check dashboard state
+            original_send_notif = _send_desktop_notification
+            
+            def _send_with_check(result):
+                if dashboard.are_notifications_enabled():
+                    original_send_notif(result)
+            
+            # Replace the notification sender in the alert_manager module
+            import src.alert_manager
+            src.alert_manager._send_desktop_notification = _send_with_check
+            
             dashboard.run()   # blocks until window closed / quit
 
     except Exception as exc:

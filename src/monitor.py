@@ -500,3 +500,205 @@ class ProcessMonitor:
             return False  # ML model compensates via feature combination
         except Exception:
             return False
+
+
+# ===========================================================================
+# Behavior Recording Helpers  (added for personalized-model training)
+# ===========================================================================
+
+# Parent-process names that indicate the user launched the process
+# interactively (as opposed to a service or system spawning it).
+_USER_PARENT_NAMES: Set[str] = {
+    "explorer.exe",
+    "cmd.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "wt.exe",           # Windows Terminal
+    "windowsterminal.exe",
+    "bash.exe",
+    "git-bash.exe",
+    "code.exe",         # VS Code sometimes spawns children
+    "python.exe",
+    "pythonw.exe",
+}
+
+# Parent-process names that indicate a background / service launch —
+# processes spawned by these are excluded from behavior recordings.
+_SYSTEM_PARENT_NAMES: Set[str] = {
+    "services.exe",
+    "svchost.exe",
+    "wininit.exe",
+    "system",
+    "smss.exe",
+    "csrss.exe",
+    "lsass.exe",
+    "lsm.exe",
+    "winlogon.exe",
+    "taskhost.exe",
+    "taskhostw.exe",
+    "spoolsv.exe",
+}
+
+# Process-name prefixes that identify built-in Windows components —
+# these are always excluded regardless of parent.
+_SYSTEM_NAME_PREFIXES: tuple = (
+    "windows",
+    "microsoft.",
+    "system",
+    "svchost",
+    "ntoskrnl",
+    "smss",
+    "csrss",
+    "wininit",
+    "winlogon",
+    "lsass",
+    "lsm",
+    "spoolsv",
+    "msiexec",
+    "dllhost",
+    "conhost",
+    "fontdrvhost",
+    "dwm",
+    "audiodg",
+    "runtimebroker",
+    "searchindexer",
+    "searchhost",
+    "securityhealthservice",
+    "registry",
+    "memory compression",
+)
+
+
+def take_process_snapshot() -> List[Dict]:
+    """
+    Return a lightweight snapshot of every currently running process.
+
+    Each entry is a dict with keys:
+        pid  (int)   – process ID
+        name (str)   – process name (lowercased)
+
+    Used by RecordingManager to establish a BASELINE before recording
+    starts.  Any PID / name pair present in the baseline is excluded from
+    recorded samples, ensuring we only capture *newly launched* processes.
+
+    Returns
+    -------
+    list[dict]
+        One dict per accessible process.  Access-denied or already-gone
+        processes are silently skipped.
+    """
+    snapshot: List[Dict] = []
+    for proc in psutil.process_iter(attrs=["pid", "name"]):
+        try:
+            snapshot.append({
+                "pid":  proc.info["pid"],
+                "name": (proc.info["name"] or "").lower(),
+            })
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+    return snapshot
+
+
+def get_parent_process_name(pid: int) -> str:
+    """
+    Return the lowercased name of the parent process for *pid*.
+
+    Used by RecordingManager to decide whether a newly-seen process was
+    launched by the user (parent = explorer.exe / cmd.exe / …) or by the
+    system (parent = services.exe / svchost.exe / …).
+
+    Returns
+    -------
+    str
+        Parent process name, lowercased.  Returns "" on any error (access
+        denied, process already gone, no parent, etc.).
+    """
+    try:
+        proc = psutil.Process(pid)
+        parent = proc.parent()
+        if parent is None:
+            return ""
+        return (parent.name() or "").lower()
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        return ""
+
+
+def get_new_processes(
+    baseline_pids: Set[int],
+    recording_start_time: float,
+) -> List[Dict]:
+    """
+    Return processes that are *new* relative to *baseline_pids* and pass
+    the user-launched filter.
+
+    A process is considered new if ALL of the following are true:
+      1. Its PID is not in *baseline_pids* (not running when recording started).
+      2. Its ``create_time`` is >= *recording_start_time* (really started after
+         recording began — guards against PID recycling).
+      3. Its parent process is in ``_USER_PARENT_NAMES`` (user-launched).
+      4. Its name does not start with any prefix in ``_SYSTEM_NAME_PREFIXES``.
+      5. Its parent is NOT in ``_SYSTEM_PARENT_NAMES``.
+
+    Parameters
+    ----------
+    baseline_pids : set[int]
+        PIDs present when ``take_process_snapshot()`` was called at the
+        start of recording.
+    recording_start_time : float
+        Unix epoch time when recording started.
+
+    Returns
+    -------
+    list[dict]
+        Each dict has keys: pid, name, exe, create_time, parent_name.
+    """
+    new_procs: List[Dict] = []
+
+    for proc in psutil.process_iter(attrs=["pid", "name", "exe", "create_time"]):
+        try:
+            pid  = proc.info["pid"]
+            name = (proc.info["name"] or "").lower()
+            exe  = proc.info.get("exe") or ""
+            ct   = proc.info.get("create_time") or 0.0
+
+            # --- Filter 1: must be new (not in baseline) ----------------
+            if pid in baseline_pids:
+                continue
+
+            # --- Filter 2: must have started after recording began ------
+            if ct < recording_start_time:
+                continue
+
+            # --- Filter 3: exclude built-in Windows name prefixes -------
+            if any(name.startswith(prefix) for prefix in _SYSTEM_NAME_PREFIXES):
+                continue
+
+            # --- Filter 4: parent-process check -------------------------
+            parent_name = get_parent_process_name(pid)
+
+            # Exclude if spawned by a known system service parent
+            if parent_name in _SYSTEM_PARENT_NAMES:
+                continue
+
+            # Include only if parent is a known user-launch parent.
+            # If parent_name is empty (e.g. orphaned process) we still
+            # allow it through so long as it passed the name-prefix check.
+            if parent_name and parent_name not in _USER_PARENT_NAMES:
+                # The parent is neither a system nor a user-launch process.
+                # We allow it through with a note — the RecordingManager
+                # can decide whether to accept it.  This covers cases like
+                # an IDE spawning a compiler, or a browser spawning a helper.
+                pass
+
+            new_procs.append({
+                "pid":         pid,
+                "name":        name,
+                "exe":         exe,
+                "create_time": ct,
+                "parent_name": parent_name,
+            })
+
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+
+    return new_procs

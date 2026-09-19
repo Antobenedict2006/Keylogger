@@ -1,0 +1,26 @@
+timestamp,process_name,pid,exe_path,parent_name,hook_api_present,has_ll_keyboard_hook,hook_related_dll_count,has_visible_window,window_count,cpu_mean,cpu_max,mem_rss_mb_mean,file_write_bytes_sum,file_write_rate,open_file_count_mean,net_connections_mean,net_bytes_sent_sum,is_signed,is_system_process,has_startup_entry,no_exe_path,cmdline_empty,name_length,running_from_temp,running_from_appdata,age_seconds,hook_no_window,hook_with_network,label
+2026-09-19 09:01:12,chrome.exe,4521,C:\Program Files\Google\Chrome\Application\chrome.exe,explorer.exe,1,0,1,1,3,8.2,22.5,312.4,1048576,410.2,18,4,82432,1,0,0,0,0,10,0,0,312.0,0,1,safe
+2026-09-19 09:03:44,code.exe,7832,C:\Users\Anto\AppData\Local\Programs\Microsoft VS Code\Code.exe,explorer.exe,1,0,2,1,2,12.1,35.8,480.0,2097152,820.5,32,2,4096,1,0,0,0,0,8,0,1,198.0,0,0,safe
+2026-09-19 09:15:22,notepad.exe,9104,C:\Windows\notepad.exe,explorer.exe,0,0,0,1,1,0.1,0.5,8.2,0,0.0,2,0,0,1,0,0,0,0,11,0,0,87.0,0,0,safe
+2026-09-19 09:22:05,vlc.exe,11240,C:\Program Files\VideoLAN\VLC\vlc.exe,explorer.exe,0,0,1,1,1,3.5,18.2,95.6,0,0.0,8,0,0,1,0,0,0,0,7,0,0,54.0,0,0,safe
+2026-09-19 09:31:18,autohotkey.exe,13056,C:\Program Files\AutoHotkey\AutoHotkey.exe,explorer.exe,1,0,2,0,0,0.8,2.1,14.3,0,0.0,3,0,0,1,0,0,0,0,14,0,0,43.0,1,0,safe
+2026-09-19 09:45:50,discord.exe,15288,C:\Users\Anto\AppData\Local\Discord\app-1.0.9036\Discord.exe,explorer.exe,1,0,1,1,2,4.2,12.8,285.7,32768,12.8,12,3,51200,1,0,0,0,0,11,0,1,28.0,0,1,safe
+2026-09-19 10:02:33,spotify.exe,17440,C:\Users\Anto\AppData\Roaming\Spotify\Spotify.exe,explorer.exe,1,0,1,1,1,2.1,8.4,210.3,0,0.0,9,2,24576,1,0,0,0,0,11,0,1,19.0,0,1,safe
+2026-09-19 10:14:07,steam.exe,19612,C:\Program Files (x86)\Steam\steam.exe,explorer.exe,1,0,2,1,1,1.5,6.2,185.4,16384,6.4,11,3,12288,1,0,1,0,0,9,0,0,14.0,0,1,safe
+2026-09-19 10:28:41,7zfm.exe,21834,C:\Program Files\7-Zip\7zFM.exe,explorer.exe,0,0,0,1,1,0.3,1.8,22.1,0,0.0,4,0,0,1,0,0,0,0,8,0,0,11.0,0,0,safe
+2026-09-19 10:35:19,thunderbird.exe,24012,C:\Program Files\Mozilla Thunderbird\thunderbird.exe,explorer.exe,0,0,1,1,1,2.8,9.4,148.6,8192,3.2,14,1,8192,1,0,0,0,0,15,0,0,9.0,0,0,safe
+2026-09-19 10:44:28,python.exe,26190,C:\Users\Anto\AppData\Local\Programs\Python\Python312\python.exe,cmd.exe,0,0,0,0,0,22.5,85.3,64.2,4096,1.6,6,0,0,1,0,0,0,0,10,0,0,7.0,0,0,safe
+2026-09-19 10:52:14,powershell.exe,28344,C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe,explorer.exe,0,0,0,1,1,5.1,18.7,42.8,0,0.0,5,0,0,1,0,0,0,0,14,0,0,6.0,0,0,safe
+2026-09-19 11:03:55,mspaint.exe,30512,C:\Windows\system32\mspaint.exe,explorer.exe,0,0,0,1,1,0.5,2.1,28.4,0,0.0,3,0,0,1,0,0,0,0,11,0,0,5.0,0,0,safe
+2026-09-19 11:18:22,winrar.exe,32680,C:\Program Files\WinRAR\WinRAR.exe,explorer.exe,0,0,0,1,1,1.2,5.4,45.3,16384,6.4,5,0,0,1,0,0,0,0,9,0,0,4.0,0,0,safe
+2026-09-19 11:31:48,obs64.exe,34850,C:\Program Files\obs-studio\bin\64bit\obs64.exe,explorer.exe,1,0,3,1,2,8.4,42.1,520.8,0,0.0,22,1,2048,1,0,0,0,0,9,0,0,4.0,0,0,safe
+2026-09-19 11:47:09,gimp-2.10.exe,37024,C:\Program Files\GIMP 2\bin\gimp-2.10.exe,explorer.exe,0,0,1,1,2,5.8,24.3,310.2,65536,25.6,18,0,0,1,0,0,0,0,14,0,0,3.0,0,0,safe
+2026-09-19 12:02:34,winscp.exe,39200,C:\Program Files\WinSCP\WinSCP.exe,explorer.exe,0,0,0,1,1,1.8,7.2,62.4,0,0.0,7,1,4096,1,0,0,0,0,10,0,0,3.0,0,1,safe
+2026-09-19 12:18:51,putty.exe,41376,C:\Program Files\PuTTY\putty.exe,explorer.exe,1,0,1,1,1,0.6,2.8,18.9,0,0.0,4,1,1024,1,0,0,0,0,9,0,0,2.0,0,1,safe
+2026-09-19 12:35:17,postman.exe,43552,C:\Users\Anto\AppData\Local\Postman\Postman.exe,explorer.exe,1,0,1,1,1,6.2,19.4,380.5,0,0.0,16,4,32768,1,0,0,0,0,11,0,1,2.0,0,1,safe
+2026-09-19 12:51:44,dbeaver.exe,45728,C:\Program Files\DBeaver\dbeaver.exe,explorer.exe,0,0,1,1,1,9.4,28.7,512.3,8192,3.2,24,2,8192,1,0,0,0,0,11,0,0,2.0,0,0,safe
+2026-09-19 13:08:22,firefox.exe,47904,C:\Program Files\Mozilla Firefox\firefox.exe,explorer.exe,1,0,1,1,2,7.3,21.5,290.4,524288,205.2,15,3,65536,1,0,0,0,0,11,0,0,1.0,0,1,safe
+2026-09-19 13:24:50,teams.exe,50080,C:\Users\Anto\AppData\Local\Microsoft\Teams\current\Teams.exe,explorer.exe,1,0,2,1,2,5.4,16.8,495.7,16384,6.4,18,4,49152,1,0,1,0,0,9,0,1,1.0,0,1,safe
+2026-09-19 13:41:18,winmerge.exe,52256,C:\Program Files\WinMerge\WinMergeU.exe,explorer.exe,0,0,0,1,2,0.9,3.4,38.2,0,0.0,6,0,0,1,0,0,0,0,12,0,0,1.0,0,0,safe
+2026-09-19 13:57:45,inkscape.exe,54432,C:\Program Files\Inkscape\bin\inkscape.exe,explorer.exe,0,0,1,1,1,4.2,15.6,182.4,32768,12.8,12,0,0,1,0,0,0,0,12,0,0,1.0,0,0,safe
+2026-09-19 14:14:12,everything.exe,56608,C:\Program Files\Everything\Everything.exe,explorer.exe,0,0,0,1,1,0.2,0.8,14.6,0,0.0,3,0,0,1,0,0,0,0,13,0,0,0.8,0,0,safe

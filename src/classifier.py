@@ -58,6 +58,13 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_PATH = Path(__file__).parent.parent / "models" / "keylogger_detector.joblib"
 
+# Personalized model path — written by the Train-Model tab after the user
+# records their own behavior and trains a personalized classifier.
+# If this file exists it takes priority over the generic model above.
+PERSONALIZED_MODEL_PATH = (
+    Path(__file__).parent.parent / "models" / "keylogger_detector_personalized.joblib"
+)
+
 SUSPICIOUS_THRESHOLD: float = 0.35
 MALICIOUS_THRESHOLD: float  = 0.70
 
@@ -192,10 +199,12 @@ class KeyloggerClassifier:
 
     def __init__(self, model_path: Path = DEFAULT_MODEL_PATH) -> None:
         self._model_path = Path(model_path)
+        self._personalized_path = PERSONALIZED_MODEL_PATH
         self._model = None          # sklearn Pipeline or None
         self._labels: List[str] = ["safe", "suspicious", "malicious"]
         self._model_version: str = "heuristic"
         self._model_mtime: float = 0.0
+        self._is_personalized = False  # NEW: track whether using personalized model
         self._lock = threading.Lock()
 
         # Background thread for hot-reload
@@ -209,9 +218,20 @@ class KeyloggerClassifier:
     def load_model(self) -> bool:
         """
         Attempt to load the serialised model from disk.
-        Returns True on success, False if file doesn't exist yet.
+
+        Load order (highest priority first):
+          1. Personalized model  (models/keylogger_detector_personalized.joblib)
+          2. Generic model       (models/keylogger_detector.joblib)
+
+        Returns True on success, False if neither file exists.
         """
-        return self._try_load()
+        # Try personalized first
+        if self._personalized_path.exists():
+            ok = self._try_load(self._personalized_path, personalized=True)
+            if ok:
+                return True
+        # Fall back to generic
+        return self._try_load(self._model_path, personalized=False)
 
     def start_hot_reload(self) -> None:
         """Start a background thread that watches the model file for changes."""
@@ -309,39 +329,66 @@ class KeyloggerClassifier:
     def model_version(self) -> str:
         return self._model_version
 
+    def is_personalized_model(self) -> bool:
+        """Return True if the currently loaded model is a personalized one."""
+        with self._lock:
+            return self._is_personalized
+
+    def reload_personalized(self) -> bool:
+        """
+        Force a reload checking personalized model first.
+        Called by the Train-Model tab immediately after training completes
+        so the running detector picks up the new model without restart.
+        """
+        if self._personalized_path.exists():
+            ok = self._try_load(self._personalized_path, personalized=True)
+            if ok:
+                logger.info("Personalized model reloaded successfully.")
+                return True
+        return self._try_load(self._model_path, personalized=False)
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
 
-    def _try_load(self) -> bool:
-        """Load / reload model from disk. Thread-safe."""
-        if not self._model_path.exists():
+    def _try_load(self, path: Optional[Path] = None, personalized: bool = False) -> bool:
+        """Load / reload model from *path*. Thread-safe.
+
+        Parameters
+        ----------
+        path        : Path to the .joblib file.  Defaults to self._model_path.
+        personalized: Whether this is a personalized model file.
+        """
+        target = Path(path) if path else self._model_path
+        if not target.exists():
             logger.info(
                 "No model file found at %s — using heuristic scorer.",
-                self._model_path,
+                target,
             )
             return False
         try:
             import joblib
-            data = joblib.load(self._model_path)
+            data = joblib.load(target)
             model   = data["model"]
             labels  = data.get("labels", ["safe", "suspicious", "malicious"])
             version = data.get("version", "unknown")
-            mtime   = self._model_path.stat().st_mtime
+            mtime   = target.stat().st_mtime
 
             with self._lock:
-                self._model         = model
-                self._labels        = labels
-                self._model_version = version
-                self._model_mtime   = mtime
+                self._model          = model
+                self._labels         = labels
+                self._model_version  = version
+                self._model_mtime    = mtime
+                self._is_personalized = personalized
 
             logger.info(
-                "Loaded ML model v%s from %s (labels=%s).",
-                version, self._model_path, labels,
+                "Loaded %s ML model v%s from %s (labels=%s).",
+                "personalized" if personalized else "generic",
+                version, target, labels,
             )
             return True
         except Exception as exc:
-            logger.error("Failed to load model: %s", exc)
+            logger.error("Failed to load model from %s: %s", target, exc)
             return False
 
     def _reload_loop(self) -> None:
@@ -350,11 +397,22 @@ class KeyloggerClassifier:
             if self._stop_reload.is_set():
                 break
             try:
-                if self._model_path.exists():
+                # Personalized model takes priority — check it first
+                if self._personalized_path.exists():
+                    mtime = self._personalized_path.stat().st_mtime
+                    with self._lock:
+                        cur_mtime    = self._model_mtime
+                        cur_personal = self._is_personalized
+                    if mtime != cur_mtime or not cur_personal:
+                        logger.info("Personalized model changed — reloading.")
+                        self._try_load(self._personalized_path, personalized=True)
+                elif self._model_path.exists():
                     mtime = self._model_path.stat().st_mtime
-                    if mtime != self._model_mtime:
-                        logger.info("Model file changed — reloading.")
-                        self._try_load()
+                    with self._lock:
+                        cur_mtime = self._model_mtime
+                    if mtime != cur_mtime:
+                        logger.info("Generic model file changed — reloading.")
+                        self._try_load(self._model_path, personalized=False)
             except Exception as exc:
                 logger.debug("Reload check error: %s", exc)
 

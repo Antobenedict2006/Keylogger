@@ -46,11 +46,12 @@ Real data
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -378,6 +379,323 @@ def save_model(
 
 
 # ---------------------------------------------------------------------------
+# Personalized model training  (real SAFE rows + synthetic MALICIOUS rows)
+# ---------------------------------------------------------------------------
+
+# Minimum real SAFE samples required to train a personalized model.
+MIN_REAL_SAMPLES: int = 50
+
+# Ratio: for every 1 real SAFE sample, generate this many synthetic MALICIOUS.
+# Keeping malicious ≥ safe prevents the model from being trivially biased.
+SYNTHETIC_MALICIOUS_RATIO: int = 3
+
+
+def load_and_validate_real_csv(csv_path: Path) -> pd.DataFrame:
+    """
+    Load a behavior-recording CSV and validate its structure.
+
+    The CSV must have at minimum the columns defined in FEATURE_NAMES plus
+    a "label" column.  Extra columns (timestamp, pid, exe_path, …) are
+    silently dropped.
+
+    Parameters
+    ----------
+    csv_path : Path
+        Path to the behavior-recording CSV exported by the dashboard.
+
+    Returns
+    -------
+    pd.DataFrame
+        Cleaned DataFrame with exactly FEATURE_NAMES + ["label"] columns.
+
+    Raises
+    ------
+    ValueError
+        If required feature columns are missing or the sample count is
+        below MIN_REAL_SAMPLES.
+    """
+    df_raw = pd.read_csv(csv_path)
+
+    # Check which feature columns are present
+    missing = [c for c in FEATURE_NAMES if c not in df_raw.columns]
+    if missing:
+        raise ValueError(
+            f"Behavior CSV is missing {len(missing)} feature columns: {missing[:5]}…\n"
+            f"Make sure the CSV was exported by the Train-Model tab."
+        )
+
+    # Keep only the columns we need; add label if absent (default: safe)
+    df = df_raw[FEATURE_NAMES].copy()
+    df["label"] = df_raw["label"].str.lower() if "label" in df_raw.columns else "safe"
+
+    # Normalise label: anything that is not malicious/suspicious → safe
+    df["label"] = df["label"].apply(
+        lambda x: x if x in ("safe", "suspicious", "malicious") else "safe"
+    )
+
+    # Enforce numeric features
+    for col in FEATURE_NAMES:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+
+    n_safe = (df["label"] == "safe").sum()
+    if n_safe < MIN_REAL_SAMPLES:
+        raise ValueError(
+            f"Only {n_safe} safe samples found in {csv_path.name}.  "
+            f"Record for longer (need at least {MIN_REAL_SAMPLES} samples)."
+        )
+
+    logger.info(
+        "Loaded behavior CSV: %d rows (%d safe, %d non-safe) from %s",
+        len(df),
+        n_safe,
+        len(df) - n_safe,
+        csv_path,
+    )
+    return df
+
+
+def build_personalized_dataset(
+    real_df: pd.DataFrame,
+    synthetic_ratio: int = SYNTHETIC_MALICIOUS_RATIO,
+    seed: int = 42,
+) -> Tuple[pd.DataFrame, Dict]:
+    """
+    Combine real SAFE rows with synthetic MALICIOUS rows.
+
+    Strategy
+    --------
+    * Count real SAFE samples  → n_safe
+    * Generate  n_safe × synthetic_ratio  synthetic MALICIOUS rows
+    * Generate  n_safe × 1               synthetic SUSPICIOUS rows
+      (adds an intermediate class so the model learns the full spectrum)
+    * Concatenate and shuffle
+
+    The final class distribution is roughly:
+        safe        ~25 %   (real recordings — user's actual programs)
+        suspicious  ~25 %   (synthetic)
+        malicious   ~50 %   (synthetic)
+
+    Returns
+    -------
+    (combined_df, metadata_dict)
+    """
+    n_real_safe = int((real_df["label"] == "safe").sum())
+    n_synthetic_malicious = n_real_safe * synthetic_ratio
+    # Add equal suspicious rows to give the model a full three-class view
+    n_synthetic_suspicious = n_real_safe
+
+    logger.info(
+        "Building personalized dataset: %d real-safe + %d synthetic-malicious "
+        "+ %d synthetic-suspicious",
+        n_real_safe, n_synthetic_malicious, n_synthetic_suspicious,
+    )
+
+    synthetic_df = generate_dataset(
+        n_safe=0,                         # no extra safe; we have real ones
+        n_suspicious=n_synthetic_suspicious,
+        n_malicious=n_synthetic_malicious,
+        seed=seed,
+    )
+    # generate_dataset() includes a "label" column; drop the zero-count safe rows
+    synthetic_df = synthetic_df[synthetic_df["label"] != "safe"].reset_index(drop=True)
+
+    combined = pd.concat([real_df, synthetic_df], ignore_index=True)
+    combined  = combined.sample(frac=1, random_state=seed).reset_index(drop=True)
+
+    metadata = {
+        "real_safe_samples":         n_real_safe,
+        "synthetic_malicious_samples": n_synthetic_malicious,
+        "synthetic_suspicious_samples": n_synthetic_suspicious,
+        "total_samples":              len(combined),
+    }
+    return combined, metadata
+
+
+def save_model_with_metadata(
+    pipeline,
+    output_path: Path,
+    model_type: str,
+    version: str,
+    extra_metadata: Optional[Dict] = None,
+) -> None:
+    """
+    Save a trained pipeline together with optional training metadata.
+
+    In addition to the standard joblib payload this also writes a
+    human-readable JSON sidecar at  <output_path>.json  so users can
+    inspect training stats without loading the model.
+
+    Parameters
+    ----------
+    pipeline       : fitted sklearn Pipeline.
+    output_path    : destination .joblib path.
+    model_type     : "gb" or "rf".
+    version        : version string.
+    extra_metadata : dict merged into both joblib payload and JSON sidecar.
+    """
+    import joblib
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    data = {
+        "model":       pipeline,
+        "labels":      LABELS,
+        "version":     version,
+        "model_type":  model_type,
+        "features":    FEATURE_NAMES,
+        "trained_at":  now_iso,
+    }
+    if extra_metadata:
+        data.update(extra_metadata)
+
+    joblib.dump(data, output_path)
+    logger.info("Model saved to %s", output_path)
+
+    # Write human-readable JSON sidecar (excludes the sklearn object itself)
+    sidecar_path = output_path.with_suffix(".json")
+    sidecar = {k: v for k, v in data.items() if k != "model"}
+    sidecar["trained_at"] = now_iso
+    sidecar_path.write_text(
+        json.dumps(sidecar, indent=2, default=str), encoding="utf-8"
+    )
+    logger.info("Metadata sidecar written to %s", sidecar_path)
+
+
+def train_personalized(
+    csv_path: Path,
+    output_path: Optional[Path] = None,
+    model_type: str = "gb",
+    n_estimators: int = 300,
+    cv_folds: int = 5,
+    seed: int = 42,
+    version: str = "personalized-1.0",
+    progress_callback: Optional[Callable[[str, float], None]] = None,
+) -> Dict:
+    """
+    Full personalized-model training pipeline called by the dashboard.
+
+    Steps
+    -----
+    1. Load and validate the behavior-recording CSV.
+    2. Build a balanced dataset (real SAFE + synthetic MALICIOUS/SUSPICIOUS).
+    3. Train a Gradient Boosting pipeline with cross-validation.
+    4. Save the model as  models/keylogger_detector_personalized.joblib
+       plus a JSON metadata sidecar.
+
+    Parameters
+    ----------
+    csv_path          : Path to the behavior-recording CSV.
+    output_path       : Override output path (default: personalized model path).
+    model_type        : "gb" or "rf".
+    n_estimators      : Number of trees.
+    cv_folds          : Cross-validation folds.
+    seed              : Random seed.
+    version           : Version string embedded in the model.
+    progress_callback : Optional callable(message: str, fraction: float).
+                        Fraction is 0.0–1.0.  Used by the dashboard progress bar.
+
+    Returns
+    -------
+    dict with keys:
+        success        (bool)
+        accuracy       (float, 0–1)
+        cv_f1_mean     (float)
+        cv_f1_std      (float)
+        n_real_safe    (int)
+        n_synthetic    (int)
+        n_total        (int)
+        model_path     (str)
+        error          (str or None)
+    """
+    def _progress(msg: str, pct: float) -> None:
+        logger.info("[%.0f%%] %s", pct * 100, msg)
+        if progress_callback:
+            try:
+                progress_callback(msg, pct)
+            except Exception:
+                pass
+
+    out_path = Path(output_path) if output_path else (
+        PROJECT_ROOT / "models" / "keylogger_detector_personalized.joblib"
+    )
+
+    try:
+        # Step 1 — Load CSV
+        _progress("Loading behavior recording CSV…", 0.05)
+        real_df = load_and_validate_real_csv(csv_path)
+
+        # Step 2 — Build balanced dataset
+        _progress("Building balanced training dataset…", 0.15)
+        combined_df, meta = build_personalized_dataset(real_df, seed=seed)
+
+        # Step 3 — Train
+        _progress("Running cross-validation…", 0.30)
+        pipeline, report, cv_scores = train(
+            combined_df,
+            model_type=model_type,
+            n_estimators=n_estimators,
+            cv_folds=cv_folds,
+            seed=seed,
+        )
+        _progress("Training complete. Evaluating…", 0.80)
+
+        # Derive a simple accuracy from the classification report
+        from sklearn.metrics import accuracy_score
+        from sklearn.model_selection import train_test_split
+        X = combined_df[FEATURE_NAMES].values.astype("float32")
+        y = combined_df["label"].values
+        _, X_test, _, y_test = train_test_split(
+            X, y, test_size=0.20, stratify=y, random_state=seed
+        )
+        y_pred = pipeline.predict(X_test)
+        accuracy = float(accuracy_score(y_test, y_pred))
+
+        # Step 4 — Save
+        _progress("Saving personalized model…", 0.90)
+        extra = {
+            "model_type_label":             "personalized",
+            "real_safe_samples":            meta["real_safe_samples"],
+            "synthetic_malicious_samples":  meta["synthetic_malicious_samples"],
+            "synthetic_suspicious_samples": meta["synthetic_suspicious_samples"],
+            "total_samples":                meta["total_samples"],
+            "accuracy":                     round(accuracy, 4),
+            "cv_f1_mean":                   round(float(cv_scores.mean()), 4),
+            "cv_f1_std":                    round(float(cv_scores.std()),  4),
+            "source_csv":                   str(csv_path),
+        }
+        save_model_with_metadata(pipeline, out_path, model_type, version, extra)
+
+        _progress("Done!", 1.0)
+
+        return {
+            "success":    True,
+            "accuracy":   accuracy,
+            "cv_f1_mean": float(cv_scores.mean()),
+            "cv_f1_std":  float(cv_scores.std()),
+            "n_real_safe":   meta["real_safe_samples"],
+            "n_synthetic":   meta["synthetic_malicious_samples"] + meta["synthetic_suspicious_samples"],
+            "n_total":       meta["total_samples"],
+            "model_path":    str(out_path),
+            "error":         None,
+        }
+
+    except Exception as exc:
+        logger.error("train_personalized failed: %s", exc, exc_info=True)
+        return {
+            "success":   False,
+            "accuracy":  0.0,
+            "cv_f1_mean": 0.0,
+            "cv_f1_std":  0.0,
+            "n_real_safe": 0,
+            "n_synthetic": 0,
+            "n_total":     0,
+            "model_path":  "",
+            "error":       str(exc),
+        }
+
+
+# ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
@@ -401,6 +719,15 @@ def _build_parser() -> argparse.ArgumentParser:
                    help="Save generated dataset to this CSV path.")
     p.add_argument("--load-csv", type=Path, default=None,
                    help="Train on this existing labelled CSV instead of generating data.")
+    # NEW: load a behavior-recording CSV of real SAFE samples and mix with
+    # synthetic MALICIOUS samples for personalized model training.
+    p.add_argument("--load-real-csv", type=Path, default=None,
+                   help=(
+                       "Path to a behavior-recording CSV (all rows labelled 'safe'). "
+                       "The script will generate 3× synthetic malicious rows to "
+                       "balance the dataset and save the model as "
+                       "keylogger_detector_personalized.joblib."
+                   ))
     p.add_argument("--seed", type=int, default=42,
                    help="Random seed for reproducibility.")
     p.add_argument("--version", type=str, default="1.0",
@@ -420,7 +747,35 @@ def main() -> int:
     # ------------------------------------------------------------------
     # Load or generate dataset
     # ------------------------------------------------------------------
-    if args.load_csv:
+    if args.load_real_csv:
+        # Personalized training: real SAFE recordings + synthetic MALICIOUS
+        logger.info(
+            "Personalized training mode — loading real CSV: %s",
+            args.load_real_csv,
+        )
+        result = train_personalized(
+            csv_path=args.load_real_csv,
+            output_path=PROJECT_ROOT / "models" / "keylogger_detector_personalized.joblib",
+            model_type=args.model_type,
+            n_estimators=args.estimators,
+            cv_folds=args.cv_folds,
+            seed=args.seed,
+            version=f"personalized-{args.version}",
+        )
+        if result["success"]:
+            print("\n✅ Personalized model trained successfully!")
+            print(f"   Accuracy        : {result['accuracy']:.1%}")
+            print(f"   CV F1-macro     : {result['cv_f1_mean']:.3f} ± {result['cv_f1_std']:.3f}")
+            print(f"   Real SAFE rows  : {result['n_real_safe']}")
+            print(f"   Synthetic rows  : {result['n_synthetic']}")
+            print(f"   Total samples   : {result['n_total']}")
+            print(f"   Saved to        : {result['model_path']}")
+        else:
+            print(f"\n❌ Personalized training failed: {result['error']}")
+            return 1
+        return 0
+
+    elif args.load_csv:
         logger.info("Loading dataset from %s…", args.load_csv)
         df = pd.read_csv(args.load_csv)
         # Validate required columns
@@ -484,7 +839,7 @@ def main() -> int:
     # ------------------------------------------------------------------
     # Save
     # ------------------------------------------------------------------
-    save_model(pipeline, args.output, args.model_type, args.version)
+    save_model_with_metadata(pipeline, args.output, args.model_type, args.version)
     print(f"\nModel written to: {args.output}")
     print("The running detector will hot-reload this file within 60 seconds.")
 
