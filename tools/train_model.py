@@ -213,7 +213,7 @@ def generate_dataset(
 
     X = np.stack(rows)
     df = pd.DataFrame(X, columns=FEATURE_NAMES)
-    df["label"] = labels
+    df["label"] = pd.array(labels, dtype="object")   # always plain Python strings, never ArrowDtype
 
     # Shuffle
     df = df.sample(frac=1, random_state=seed).reset_index(drop=True)
@@ -265,7 +265,10 @@ def train(
     from sklearn.preprocessing import StandardScaler
 
     X = df[FEATURE_NAMES].values.astype(np.float32)
-    y = df["label"].values
+
+    # Force a plain numpy string array — pandas 2.x with pyarrow backend
+    # returns an ArrowExtensionArray from .values, which sklearn cannot index.
+    y = np.array(df["label"].tolist(), dtype=str)
 
     # Encode labels to integers for cross_val_score, then decode back
     y_int = np.array([LABEL_INT[l] for l in y])
@@ -426,7 +429,11 @@ def load_and_validate_real_csv(csv_path: Path) -> pd.DataFrame:
 
     # Keep only the columns we need; add label if absent (default: safe)
     df = df_raw[FEATURE_NAMES].copy()
-    df["label"] = df_raw["label"].str.lower() if "label" in df_raw.columns else "safe"
+    # Force plain Python strings — pyarrow-backed Series causes sklearn index errors
+    raw_labels = df_raw["label"].tolist() if "label" in df_raw.columns else ["safe"] * len(df_raw)
+    df["label"] = pd.array(
+        [str(l).lower() for l in raw_labels], dtype="object"
+    )
 
     # Normalise label: anything that is not malicious/suspicious → safe
     df["label"] = df["label"].apply(
@@ -644,7 +651,7 @@ def train_personalized(
         from sklearn.metrics import accuracy_score
         from sklearn.model_selection import train_test_split
         X = combined_df[FEATURE_NAMES].values.astype("float32")
-        y = combined_df["label"].values
+        y = np.array(combined_df["label"].tolist(), dtype=str)
         _, X_test, _, y_test = train_test_split(
             X, y, test_size=0.20, stratify=y, random_state=seed
         )

@@ -1,0 +1,40 @@
+{
+  "_comment": "This is an EXAMPLE baseline file showing the expected format.",
+  "_note": "Your actual baseline is generated automatically after ~10,000 keystrokes of normal typing.",
+  "_privacy": "Only timing data stored. No key content. Cannot reconstruct what was typed.",
+  "training_completed": "2024-01-20T15:30:00",
+  "total_keystrokes": 15234,
+  "training_duration_hours": 168.5,
+  "metrics": {
+    "wpm": {
+      "mean": 65.0,
+      "std": 8.0,
+      "min": 45.0,
+      "max": 85.0
+    },
+    "dwell_ms": {
+      "mean": 95.0,
+      "std": 15.0,
+      "min": 60.0,
+      "max": 130.0
+    },
+    "flight_ms": {
+      "mean": 145.0,
+      "std": 25.0,
+      "min": 90.0,
+      "max": 200.0
+    },
+    "consistency_stddev": {
+      "mean": 22.0,
+      "std": 5.0,
+      "min": 12.0,
+      "max": 32.0
+    },
+    "burst_count": {
+      "mean": 4.5,
+      "std": 1.2,
+      "min": 2.0,
+      "max": 7.0
+    }
+  }
+}

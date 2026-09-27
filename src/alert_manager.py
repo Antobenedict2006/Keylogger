@@ -365,6 +365,15 @@ def _send_desktop_notification(result: ClassificationResult) -> None:
     )
     body = f"PID {result.pid}\nScore: {result.score:.0%}\n\n{reasons_txt}"
 
+    # Windows NOTIFYICONDATAW limits: title ≤ 63 chars, message ≤ 255 chars.
+    # Truncate gracefully so plyer never raises ValueError.
+    MAX_TITLE = 63
+    MAX_BODY  = 255
+    if len(title) > MAX_TITLE:
+        title = title[:MAX_TITLE - 1] + "…"
+    if len(body) > MAX_BODY:
+        body = body[:MAX_BODY - 1] + "…"
+
     try:
         from plyer import notification as plyer_notif
         plyer_notif.notify(

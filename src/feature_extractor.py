@@ -47,7 +47,11 @@ Feature groups
       running_from_appdata     : 1 if exe lives under AppData (non-Temp)
       age_seconds              : seconds since process was created
 
-Total: 23 features (FEATURE_NAMES below matches this order exactly).
+Total: 26 features (FEATURE_NAMES below matches this order exactly).
+
+  Group H – Extended detection signals (NEW)
+      has_kernel_hooks         : 1 if suspicious kernel drivers detected
+      uses_raw_input_api       : 1 if raw keyboard input registered (hidden window)
 """
 
 from __future__ import annotations
@@ -101,6 +105,9 @@ FEATURE_NAMES: List[str] = [
     # Group G (derived / composite)
     "hook_no_window",           # hook_api_present AND NOT has_visible_window
     "hook_with_network",        # hook_api_present AND net_connections_mean > 0
+    # Group H – Extended detection signals (kernel + raw input)
+    "has_kernel_hooks",         # suspicious kernel-mode driver detected
+    "uses_raw_input_api",       # RegisterRawInputDevices keyboard + hidden window
 ]
 
 NUM_FEATURES = len(FEATURE_NAMES)
@@ -310,6 +317,15 @@ class FeatureExtractor:
             hook_api_present and net_connections_mean > 0
         )
 
+        # ---- Group H: Extended detection signals (kernel + raw input) ---
+        # has_kernel_hooks – suspicious kernel-mode driver enumerated via
+        # NtQuerySystemInformation (cached globally; O(1) per process).
+        has_kernel_hooks = int(latest.has_kernel_hooks)
+
+        # uses_raw_input_api – process has a hidden window AND registered
+        # a raw keyboard input device via RegisterRawInputDevices.
+        uses_raw_input_api = int(latest.uses_raw_input)
+
         # ---- Assemble array (order must match FEATURE_NAMES) ------------
         raw = [
             hook_api_present,
@@ -336,6 +352,8 @@ class FeatureExtractor:
             age_seconds,
             hook_no_window,
             hook_with_network,
+            has_kernel_hooks,
+            uses_raw_input_api,
         ]
 
         assert len(raw) == NUM_FEATURES, (
@@ -356,6 +374,8 @@ class FeatureExtractor:
             file_write_rate=file_write_rate,
             no_exe_path=no_exe_path,
             hook_related_dll_count=hook_related_dll_count,
+            has_kernel_hooks=has_kernel_hooks,
+            uses_raw_input_api=uses_raw_input_api,
         )
 
         return FeatureVector(
@@ -392,6 +412,8 @@ class FeatureExtractor:
         file_write_rate: float,
         no_exe_path: int,
         hook_related_dll_count: int,
+        has_kernel_hooks: int = 0,
+        uses_raw_input_api: int = 0,
     ) -> List[str]:
         """Return plain-English reasons this process was flagged."""
         reasons: List[str] = []
@@ -430,6 +452,17 @@ class FeatureExtractor:
         if hook_related_dll_count >= 3:
             reasons.append(
                 f"{hook_related_dll_count} hook-related DLLs loaded simultaneously"
+            )
+
+        # Group H – extended signals
+        if has_kernel_hooks:
+            reasons.append(
+                "Suspicious kernel-mode driver detected (possible rootkit/keylogger)"
+            )
+
+        if uses_raw_input_api:
+            reasons.append(
+                "Raw keyboard input registered on hidden window (raw input keylogger pattern)"
             )
 
         return reasons

@@ -9,6 +9,7 @@ Tabs
   Tab 2 – Detection History : filterable SQLite query view, double-click for detail popup
   Tab 3 – Statistics        : summary cards + action breakdown + model status
   Tab 4 – Train Model       : behavior recording + personalized model training
+  Tab 5 – Behavioral Analysis : typing speed anomaly detector (Phase 1)
 
 System Tray
 -----------
@@ -34,20 +35,27 @@ CHANGES (Modernization):
 from __future__ import annotations
 
 import json
+import csv
+import logging
 import os
 import queue
 import threading
 import time
 import tkinter as tk
 import uuid
+from datetime import datetime
 from pathlib import Path
-from tkinter import messagebox, ttk
+from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import Callable, Dict, List, Optional, Set, TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
+
 
 if TYPE_CHECKING:
     from ..alert_manager import AlertManager, AlertRecord, ResponseAction
     from ..classifier import RiskLevel
     from ..db_logger import DBLogger
+    from ..monitor import ProcessSnapshot
 
 # ---------------------------------------------------------------------------
 # Colour palette  (MODERN LIGHT THEME)
@@ -254,6 +262,9 @@ class _LiveAlertsTab(ttk.Frame):
         self._tree.tag_configure("suspicious", foreground=C["suspicious"], font=("Segoe UI", 9))
         self._tree.bind("<<TreeviewSelect>>", self._on_select)
         self._tree.bind("<Double-1>",          self._on_dbl)
+        # Feature 4: right-click context menu
+        self._context_menu: Optional[tk.Menu] = None
+        self._tree.bind("<Button-3>", self._on_right_click)
 
         # Modern toolbar with rounded buttons
         bar = tk.Frame(self, bg=C["bg"], pady=10)
@@ -384,6 +395,72 @@ class _LiveAlertsTab(ttk.Frame):
                 self._tree.delete(iid)
             self._status.set("No threats detected.")
 
+    # --- Feature 4: right-click context menu ---
+    def _on_right_click(self, event) -> None:
+        """Select the row under cursor and show context menu."""
+        row_id = self._tree.identify_row(event.y)
+        if not row_id:
+            return
+        self._tree.selection_set(row_id)
+        self._on_select(None)   # sync self._selected
+
+        # Lazy-create the menu once
+        if self._context_menu is None:
+            self._context_menu = self._create_context_menu()
+
+        try:
+            self._context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._context_menu.grab_release()
+
+    def _create_context_menu(self) -> tk.Menu:
+        """Build and return the right-click menu for Live Alerts."""
+        menu = tk.Menu(self, tearoff=0,
+                       bg=C["surface"], fg=C["text"],
+                       activebackground=C["accent"], activeforeground="white",
+                       font=("Segoe UI", 9), relief=tk.FLAT)
+        menu.add_command(label="🗉 Terminate Process",
+                         command=self._terminate)
+        menu.add_command(label="💀 Force Kill",
+                         command=self._terminate)   # same as terminate
+        menu.add_command(label="🔒 Quarantine",
+                         command=self._quarantine)
+        menu.add_command(label="✓ Add to Whitelist",
+                         command=self._whitelist)
+        menu.add_separator()
+        menu.add_command(label="🔍 View Full Details",
+                         command=self._on_dbl_from_menu)
+        menu.add_command(label="📋 Copy Process Name",
+                         command=self._copy_process_name)
+        menu.add_separator()
+        menu.add_command(label="↻ Refresh",
+                         command=self.refresh)
+        return menu
+
+    def _on_dbl_from_menu(self) -> None:
+        """Open detail popup for currently selected row (menu action)."""
+        sel = self._tree.selection()
+        if not sel or not self._selected:
+            return
+        v = self._tree.item(sel[0])["values"]
+        _DetailPopup(self, {
+            "pid": v[1], "process_name": v[2], "risk_level": v[3],
+            "score": float(str(v[4]).rstrip("%")) / 100,
+            "confidence": 0.0, "detected_at": time.time(),
+            "actioned": False,
+            "reasons": self._selected.result.reasons if self._selected else [],
+        })
+
+    def _copy_process_name(self) -> None:
+        """Copy the selected process name to the clipboard."""
+        sel = self._tree.selection()
+        if not sel:
+            return
+        name = str(self._tree.item(sel[0])["values"][2])
+        self.clipboard_clear()
+        self.clipboard_append(name)
+        self._status.set(f"Copied '{name}' to clipboard")
+
 
 # ---------------------------------------------------------------------------
 # Tab 2 – Detection History
@@ -457,6 +534,9 @@ class _HistoryTab(ttk.Frame):
         self._tree.tag_configure("suspicious", foreground=C["suspicious"], font=("Segoe UI", 9))
         self._tree.tag_configure("safe",       foreground=C["safe"], font=("Segoe UI", 9))
         self._tree.bind("<Double-1>", self._on_dbl)
+        # Feature 4: right-click context menu
+        self._context_menu: Optional[tk.Menu] = None
+        self._tree.bind("<Button-3>", self._on_right_click)
 
     def filter_by_risk(self, risk_level: str) -> None:
         """
@@ -472,15 +552,25 @@ class _HistoryTab(ttk.Frame):
         self.refresh()
 
     def refresh(self) -> None:
+        """Asynchronous non-blocking history refresh to keep UI at 60 FPS."""
         risk = self._risk_var.get().lower()
         risk = None if risk == "all" else risk
         since = time.time() - self._hours_var.get() * 3600
 
-        rows = self._db.query_detections(
-            limit=HISTORY_LIMIT, risk_level=risk, since=since
-        )
-        self._cache = rows
+        def _fetch():
+            try:
+                rows = self._db.query_detections(
+                    limit=HISTORY_LIMIT, risk_level=risk, since=since
+                )
+                if self.winfo_exists():
+                    self.after(0, lambda: self._apply_rows(rows))
+            except Exception as exc:
+                logger.debug("History query error: %s", exc)
 
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _apply_rows(self, rows: List[Dict]) -> None:
+        self._cache = rows
         for iid in self._tree.get_children():
             self._tree.delete(iid)
 
@@ -502,6 +592,74 @@ class _HistoryTab(ttk.Frame):
         idx = self._tree.index(sel[0])
         if idx < len(self._cache):
             _DetailPopup(self, self._cache[idx])
+
+    # --- Feature 4: right-click context menu ---
+    def _on_right_click(self, event) -> None:
+        """Select the row under cursor and show context menu."""
+        row_id = self._tree.identify_row(event.y)
+        if not row_id:
+            return
+        self._tree.selection_set(row_id)
+
+        if self._context_menu is None:
+            self._context_menu = self._create_context_menu()
+
+        try:
+            self._context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self._context_menu.grab_release()
+
+    def _create_context_menu(self) -> tk.Menu:
+        """Build and return the right-click menu for History tab."""
+        menu = tk.Menu(self, tearoff=0,
+                       bg=C["surface"], fg=C["text"],
+                       activebackground=C["accent"], activeforeground="white",
+                       font=("Segoe UI", 9), relief=tk.FLAT)
+        menu.add_command(label="🔍 View Details",
+                         command=self._view_selected_detail)
+        menu.add_command(label="📋 Copy Process Name",
+                         command=self._copy_process_name)
+        menu.add_separator()
+        menu.add_command(label="🗑️ Delete Entry",
+                         command=self._delete_selected_entry)
+        return menu
+
+    def _view_selected_detail(self) -> None:
+        """Open detail popup for the currently selected row."""
+        sel = self._tree.selection()
+        if not sel:
+            return
+        idx = self._tree.index(sel[0])
+        if idx < len(self._cache):
+            _DetailPopup(self, self._cache[idx])
+
+    def _copy_process_name(self) -> None:
+        """Copy the selected row's process name to the clipboard."""
+        sel = self._tree.selection()
+        if not sel:
+            return
+        name = str(self._tree.item(sel[0])["values"][2])
+        self.clipboard_clear()
+        self.clipboard_append(name)
+
+    def _delete_selected_entry(self) -> None:
+        """Remove the selected detection row from the Treeview (UI-only).
+
+        Note: This hides the row from the current view; the underlying
+        database record is retained for audit purposes.
+        """
+        sel = self._tree.selection()
+        if not sel:
+            return
+        if messagebox.askyesno(
+            "Delete Entry",
+            "Remove this row from the current view?\n"
+            "(The database record is kept for audit purposes.)"
+        ):
+            idx = self._tree.index(sel[0])
+            self._tree.delete(sel[0])
+            if idx < len(self._cache):
+                self._cache.pop(idx)
 
 
 # ---------------------------------------------------------------------------
@@ -648,9 +806,22 @@ class _StatsTab(ttk.Frame):
         self._switch_to_history(filter_value)
 
     def refresh(self) -> None:
-        stats = self._db.stats()
+        """Asynchronous non-blocking stats refresh with smooth counting transitions."""
+        def _fetch():
+            try:
+                stats = self._db.stats()
+                model_status = self._get_model_status()
+                if self.winfo_exists():
+                    self.after(0, lambda: self._apply_stats(stats, model_status))
+            except Exception as exc:
+                logger.debug("Stats async query error: %s", exc)
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _apply_stats(self, stats: Dict, model_status: str) -> None:
         for key, var in self._card_vars.items():
-            var.set(str(stats.get(key, 0)))
+            target_val = int(stats.get(key, 0))
+            self._animate_number(var, target_val)
 
         counts = stats.get("action_counts", {})
         self._action_text.config(state=tk.NORMAL)
@@ -662,7 +833,26 @@ class _StatsTab(ttk.Frame):
             self._action_text.insert(tk.END, "  No actions recorded yet.\n")
         self._action_text.config(state=tk.DISABLED)
 
-        self._model_var.set(self._get_model_status())
+        self._model_var.set(model_status)
+
+    def _animate_number(self, var: tk.StringVar, target_val: int) -> None:
+        """Smoothly count up/down to target value."""
+        try:
+            curr = int(str(var.get()).replace(",", "") or 0)
+        except ValueError:
+            curr = 0
+
+        if curr == target_val:
+            return
+
+        diff = target_val - curr
+        step = max(1, abs(diff) // 4) if abs(diff) > 4 else 1
+        new_val = curr + step if diff > 0 else curr - step
+        var.set(f"{new_val:,}")
+
+        if new_val != target_val and self.winfo_exists():
+            self.after(25, lambda: self._animate_number(var, target_val))
+
 
 
 # ---------------------------------------------------------------------------
@@ -1011,6 +1201,11 @@ class _TrainModelTab(ttk.Frame):
         self._db            = db_logger
         self._get_classifier = get_classifier
         self._recorder      = RecordingManager(db_logger)
+        try:
+            from ..live_api import set_recording_manager
+            set_recording_manager(self._recorder)
+        except Exception as exc:
+            logger.debug("Could not share behavior recorder with web API: %s", exc)
         self._csv_path: Optional[Path] = None
         self._timer_job: Optional[str]  = None   # after() job id
         self._training      = False
@@ -1643,6 +1838,1034 @@ class _TrainModelTab(ttk.Frame):
 
 
 # ---------------------------------------------------------------------------
+# Tab 5 – Behavioral Analysis (Typing Speed Anomaly Detection)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Tab 5 – Behavioral Analysis (Multi-Modal Behavioral Biometrics)
+# ---------------------------------------------------------------------------
+
+class _BehavioralAnalysisTab(ttk.Frame):
+    """
+    Phase 1 & Phase 2 Multi-Modal Behavioral Biometrics Tab.
+
+    Shows:
+      • Training view   — when baseline not yet collected (< 10,000 keys or mouse)
+      • Monitoring view — multi-modal keyboard + mouse telemetry, combined similarity %,
+                          bot classification banner, and JSON export suite.
+    """
+
+    # Status band colours
+    _STATUS_COLORS = {
+        "green":  ("#27ae60", "#e8f8f0", "✅ Normal Typing & Mouse"),
+        "yellow": ("#f39c12", "#fff8e1", "🟡 Slightly Unusual"),
+        "orange": ("#e67e22", "#fef0e6", "⚠️ Suspicious Activity"),
+        "red":    ("#e74c3c", "#fdecea", "🔴 Anomaly Detected"),
+        "grey":   ("#95a5a6", "#f5f7fa", "⬜ Insufficient Data"),
+    }
+
+    def __init__(self, parent, engine=None) -> None:
+        super().__init__(parent, style="Dark.TFrame")
+        self._engine = engine
+        self._root_ref = None
+        self._available = engine is not None and engine.is_available
+        self._last_anomaly = None
+        self._last_metrics = None
+        self._anomaly_start_ts: Optional[float] = None
+        self._kb_rows: Dict[str, Dict] = {}
+        self._mouse_rows: Dict[str, Dict] = {}
+        self._pattern_rows: Dict[str, Dict] = {}
+        self._build()
+
+        # Hook engine callbacks
+        if engine:
+            engine.on_metrics_update = self._on_metrics_update
+            engine.on_mouse_update = self._on_mouse_update
+            engine.on_anomaly = self._on_anomaly_alert
+
+    def set_root_ref(self, root) -> None:
+        self._root_ref = root
+
+    # ------------------------------------------------------------------
+    # Build
+    # ------------------------------------------------------------------
+
+    def _build(self) -> None:
+        self._canvas = tk.Canvas(self, bg=C["bg"], highlightthickness=0)
+        vsb = ttk.Scrollbar(self, orient="vertical", command=self._canvas.yview,
+                            style="Modern.Vertical.TScrollbar")
+        self._canvas.configure(yscrollcommand=vsb.set)
+        vsb.pack(side=tk.RIGHT, fill=tk.Y)
+        self._canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self._inner = tk.Frame(self._canvas, bg=C["bg"])
+        self._inner_id = self._canvas.create_window(
+            (0, 0), window=self._inner, anchor="nw"
+        )
+        self._inner.bind("<Configure>", self._on_inner_configure)
+        self._canvas.bind("<Configure>", self._on_canvas_configure)
+
+        if not self._available:
+            self._build_unavailable()
+        else:
+            self._build_header()
+            self._build_privacy_banner()
+            self._build_training_section()
+            self._build_monitoring_section()
+            self._build_export_section()
+            self._build_footer_buttons()
+            self._update_view_mode()
+
+    def _on_inner_configure(self, event=None):
+        self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event=None):
+        self._canvas.itemconfig(self._inner_id, width=event.width)
+
+    # -- Unavailable view --
+
+    def _build_unavailable(self) -> None:
+        frm = tk.Frame(self._inner, bg=C["surface"], padx=32, pady=40)
+        frm.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
+        tk.Label(frm, text="🔌  Behavioral Analysis Unavailable",
+                 bg=C["surface"], fg=C["text"],
+                 font=("Segoe UI", 15, "bold")).pack(pady=(0, 12))
+        tk.Label(frm, text=(
+            "The pynput library could not be initialized for keyboard/mouse listening.\n\n"
+            "To enable behavioral biometrics, install pynput:\n"
+            "    pip install pynput==1.7.6\n\n"
+            "Then restart the application."
+        ), bg=C["surface"], fg=C["text_dim"],
+            font=("Segoe UI", 10), justify=tk.LEFT).pack()
+
+    # -- Header --
+
+    def _build_header(self) -> None:
+        hdr = tk.Frame(self._inner, bg=C["bg"], pady=12)
+        hdr.pack(fill=tk.X, padx=16)
+        tk.Label(hdr, text="🧠  Multi-Modal Behavioral Biometrics (Keyboard + Mouse)",
+                 bg=C["bg"], fg=C["text"],
+                 font=("Segoe UI", 13, "bold")).pack(side=tk.LEFT)
+        self._enabled_btn = tk.Button(
+            hdr, text="● Enabled",
+            command=self._toggle_enabled,
+            bg=C["safe"], fg="white", relief=tk.FLAT,
+            padx=12, pady=4, font=("Segoe UI", 9, "bold"),
+            cursor="hand2", borderwidth=0
+        )
+        self._enabled_btn.pack(side=tk.RIGHT)
+
+    # -- Privacy banner --
+
+    def _build_privacy_banner(self) -> None:
+        banner = tk.Frame(self._inner, bg="#e8f4f8",
+                          highlightbackground="#b3d4e8", highlightthickness=1,
+                          padx=16, pady=10)
+        banner.pack(fill=tk.X, padx=16, pady=(0, 8))
+        tk.Label(banner, text="🔒  Privacy-First Biometrics Guarantee",
+                 bg="#e8f4f8", fg=C["text"],
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w")
+        for txt in [
+            "✓  Records TIMING & MOTION DYNAMICS — never key letters or screen content",
+            "✓  Cannot see or reconstruct what you type or what buttons you click",
+            "✓  Exports include SHA-256 integrity verification with anonymized timestamps",
+        ]:
+            tk.Label(banner, text=txt, bg="#e8f4f8", fg=C["text_dim"],
+                     font=("Segoe UI", 9)).pack(anchor="w")
+
+    # -- Training section --
+
+    def _build_training_section(self) -> None:
+        self._training_frame = tk.Frame(self._inner, bg=C["surface"],
+                                        highlightbackground=C["border"],
+                                        highlightthickness=1,
+                                        padx=20, pady=16)
+        self._training_frame.pack(fill=tk.X, padx=16, pady=8)
+
+        tk.Label(self._training_frame, text="📚  Learning Your Natural Behavior Profile",
+                 bg=C["surface"], fg=C["text"],
+                 font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 8))
+
+        tk.Label(self._training_frame,
+                 text="The AI passively learns your combined typing rhythm and mouse dynamics.\n"
+                      "Continue using your computer normally.",
+                 bg=C["surface"], fg=C["text_dim"],
+                 font=("Segoe UI", 9), justify=tk.LEFT).pack(anchor="w", pady=(0, 12))
+
+        # Progress bar
+        prog_frm = tk.Frame(self._training_frame, bg=C["surface"])
+        prog_frm.pack(fill=tk.X, pady=(0, 4))
+        tk.Label(prog_frm, text="Combined Training Progress:",
+                 bg=C["surface"], fg=C["text"],
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w")
+
+        bar_bg = tk.Frame(self._training_frame, bg=C["border"],
+                          height=14, highlightthickness=0)
+        bar_bg.pack(fill=tk.X, pady=(4, 2))
+        self._prog_bar = tk.Frame(bar_bg, bg=C["accent"], height=14)
+        self._prog_bar.place(relwidth=0.0, relheight=1.0)
+
+        self._prog_pct_lbl = tk.Label(self._training_frame, text="0.0%",
+                                       bg=C["surface"], fg=C["accent"],
+                                       font=("Segoe UI", 10, "bold"))
+        self._prog_pct_lbl.pack(anchor="e")
+
+        # Stats grid
+        grid = tk.Frame(self._training_frame, bg=C["surface"])
+        grid.pack(fill=tk.X, pady=8)
+
+        self._train_ks_lbl     = self._stat_row(grid, 0, "Keystrokes Recorded:", "— / 10,000")
+        self._train_mouse_lbl  = self._stat_row(grid, 1, "Mouse Movements:", "— / 15,000")
+        self._train_elapsed_lbl = self._stat_row(grid, 2, "Time Elapsed:", "—")
+        self._train_eta_lbl    = self._stat_row(grid, 3, "Estimated Remaining:", "—")
+        self._train_speed_lbl  = self._stat_row(grid, 4, "Current Speeds:", "—")
+
+    def _stat_row(self, parent, row, label, value):
+        tk.Label(parent, text=label, bg=C["surface"], fg=C["text_dim"],
+                 font=("Segoe UI", 9), anchor="w", width=24
+                 ).grid(row=row, column=0, sticky="w", pady=2)
+        lbl = tk.Label(parent, text=value, bg=C["surface"], fg=C["text"],
+                       font=("Segoe UI", 9, "bold"), anchor="w")
+        lbl.grid(row=row, column=1, sticky="w", padx=8, pady=2)
+        return lbl
+
+    # -- Monitoring section --
+
+    def _build_monitoring_section(self) -> None:
+        self._monitoring_frame = tk.Frame(self._inner, bg=C["bg"])
+        self._monitoring_frame.pack(fill=tk.X, padx=16, pady=0)
+
+        # 1. Main Overall Status Banner
+        self._status_banner = tk.Frame(self._monitoring_frame, bg=C["surface"],
+                                       highlightbackground=C["border"],
+                                       highlightthickness=1,
+                                       padx=20, pady=14)
+        self._status_banner.pack(fill=tk.X, pady=(0, 8))
+
+        banner_top = tk.Frame(self._status_banner, bg=C["surface"])
+        banner_top.pack(fill=tk.X)
+        self._status_icon_lbl = tk.Label(banner_top, text="✅",
+                                          bg=C["surface"], font=("Segoe UI", 18))
+        self._status_icon_lbl.pack(side=tk.LEFT, padx=(0, 10))
+        status_text_frm = tk.Frame(banner_top, bg=C["surface"])
+        status_text_frm.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self._status_title_lbl = tk.Label(status_text_frm, text="Normal Typing & Mouse",
+                                           bg=C["surface"], fg=C["safe"],
+                                           font=("Segoe UI", 13, "bold"), anchor="w")
+        self._status_title_lbl.pack(anchor="w")
+
+        scores_row = tk.Frame(status_text_frm, bg=C["surface"])
+        scores_row.pack(anchor="w", fill=tk.X, pady=(2, 0))
+
+        self._similarity_lbl = tk.Label(scores_row,
+                                         text="Combined Similarity: —",
+                                         bg=C["surface"], fg=C["text"],
+                                         font=("Segoe UI", 10, "bold"), anchor="w")
+        self._similarity_lbl.pack(side=tk.LEFT, padx=(0, 16))
+
+        self._duration_lbl = tk.Label(scores_row, text="",
+                                       bg=C["surface"], fg=C["text_dim"],
+                                       font=("Segoe UI", 9), anchor="w")
+        self._duration_lbl.pack(side=tk.LEFT)
+
+        # Bot special banner (hidden by default)
+        self._bot_frame = tk.Frame(self._monitoring_frame, bg="#fdecea",
+                                   highlightbackground=C["malicious"],
+                                   highlightthickness=2, padx=16, pady=12)
+        self._bot_lbl = tk.Label(self._bot_frame,
+                                  text="🤖  Bot / Macro Detected",
+                                  bg="#fdecea", fg=C["malicious"],
+                                  font=("Segoe UI", 12, "bold"))
+        self._bot_lbl.pack(anchor="w")
+        self._bot_reason_lbl = tk.Label(self._bot_frame, text="",
+                                         bg="#fdecea", fg=C["text"],
+                                         font=("Segoe UI", 9),
+                                         justify=tk.LEFT, anchor="w")
+        self._bot_reason_lbl.pack(anchor="w", pady=(4, 0))
+
+        # 2. Three Side-by-Side or Stacked Metric Cards: Keyboard, Mouse, Pattern
+        cards_container = tk.Frame(self._monitoring_frame, bg=C["bg"])
+        cards_container.pack(fill=tk.X, pady=(0, 8))
+
+        # Card 1: Keyboard Behavior
+        self._build_table_card(
+            cards_container, "⌨️  Keyboard Behavior", "kb",
+            [
+                ("wpm", "Typing Speed", "WPM"),
+                ("dwell_ms", "Key Hold Time", "ms"),
+                ("consistency_stddev", "Timing Consistency", "ms"),
+                ("burst_count", "Burst Pattern", "bursts"),
+            ],
+            self._kb_rows,
+            footer_lbl_name="_kb_sim_lbl",
+            footer_default="Keyboard Similarity: —",
+        )
+
+        # Card 2: Mouse Behavior
+        self._build_table_card(
+            cards_container, "🖱️  Mouse Behavior", "mouse",
+            [
+                ("speed_px_per_sec", "Movement Speed", "px/s"),
+                ("curvature_index", "Path Curvature", ""),
+                ("micro_movements", "Micro-Movements", "/s"),
+                ("click_duration_ms", "Click Hold Time", "ms"),
+                ("pauses_per_minute", "Pause Frequency", "/min"),
+            ],
+            self._mouse_rows,
+            footer_lbl_name="_mouse_sim_lbl",
+            footer_default="Mouse Similarity: —",
+        )
+
+        # Card 3: Combined Pattern Analysis
+        self._build_pattern_card(cards_container)
+
+        # 3. Anomaly Analysis & Explanations
+        analysis_card = tk.Frame(self._monitoring_frame, bg=C["surface"],
+                                  highlightbackground=C["border"],
+                                  highlightthickness=1, padx=16, pady=12)
+        analysis_card.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(analysis_card, text="🔴 Alert Reasons & Evidence:",
+                 bg=C["surface"], fg=C["text"],
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 6))
+        self._analysis_text = tk.Text(
+            analysis_card, height=4, bg="#fafbfc", fg=C["text"],
+            relief=tk.FLAT, font=("Segoe UI", 9), wrap=tk.WORD,
+            borderwidth=0, state=tk.DISABLED
+        )
+        self._analysis_text.pack(fill=tk.X)
+        self._analysis_text.tag_configure("red_item", foreground=C["malicious"])
+        self._analysis_text.tag_configure("yellow_item", foreground=C["suspicious"])
+        self._analysis_text.tag_configure("ok_item", foreground=C["safe"])
+
+        # 4. Possible causes
+        causes_card = tk.Frame(self._monitoring_frame, bg=C["surface"],
+                                highlightbackground=C["border"],
+                                highlightthickness=1, padx=16, pady=12)
+        causes_card.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(causes_card, text="Possible Causes:",
+                 bg=C["surface"], fg=C["text"],
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 4))
+        self._causes_lbl = tk.Label(causes_card, text="",
+                                     bg=C["surface"], fg=C["text_dim"],
+                                     font=("Segoe UI", 9), justify=tk.LEFT,
+                                     anchor="w")
+        self._causes_lbl.pack(anchor="w")
+
+        # 5. Recent activity list
+        hist_card = tk.Frame(self._monitoring_frame, bg=C["surface"],
+                              highlightbackground=C["border"],
+                              highlightthickness=1, padx=16, pady=12)
+        hist_card.pack(fill=tk.X, pady=(0, 8))
+        tk.Label(hist_card, text="Recent Multi-Modal Windows (Last 10 Cycles):",
+                 bg=C["surface"], fg=C["text"],
+                 font=("Segoe UI", 10, "bold")).pack(anchor="w", pady=(0, 6))
+        self._history_text = tk.Text(
+            hist_card, height=5, bg="#fafbfc", fg=C["text"],
+            relief=tk.FLAT, font=("Segoe UI", 9, "bold"), wrap=tk.WORD,
+            borderwidth=0, state=tk.DISABLED
+        )
+        self._history_text.pack(fill=tk.X)
+        for tag, fg_ in [("ok", C["safe"]), ("warn", C["suspicious"]),
+                          ("bad", C["malicious"]), ("dim", C["text_dim"])]:
+            self._history_text.tag_configure(tag, foreground=fg_)
+
+    def _build_table_card(self, parent, title, prefix, metric_defs, store_dict, footer_lbl_name, footer_default):
+        card = tk.Frame(parent, bg=C["surface"], highlightbackground=C["border"], highlightthickness=1)
+        card.pack(fill=tk.X, pady=(0, 8))
+
+        # Title row
+        t_row = tk.Frame(card, bg=C["surface"], padx=12, pady=6)
+        t_row.pack(fill=tk.X)
+        tk.Label(t_row, text=title, bg=C["surface"], fg=C["text"], font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
+
+        # Header row
+        hdr_row = tk.Frame(card, bg=C["border"])
+        hdr_row.pack(fill=tk.X)
+        for txt, w in [("Metric", 180), ("Your Normal", 140), ("Current", 140), ("Status", 70)]:
+            tk.Label(hdr_row, text=txt, bg="#f0f3f7", fg=C["text"],
+                     font=("Segoe UI", 8, "bold"), anchor="w", padx=10, pady=4).pack(side=tk.LEFT)
+            tk.Frame(hdr_row, bg=C["border"], width=1).pack(side=tk.LEFT, fill=tk.Y)
+
+        for i, (key, label, unit) in enumerate(metric_defs):
+            row_bg = C["surface"] if i % 2 == 0 else "#fafbfc"
+            row = tk.Frame(card, bg=row_bg)
+            row.pack(fill=tk.X)
+            tk.Frame(row, bg=C["border"], height=1).pack(fill=tk.X, side=tk.TOP)
+            tk.Label(row, text=label, bg=row_bg, fg=C["text"],
+                     font=("Segoe UI", 9), anchor="w", padx=10, pady=5, width=22).pack(side=tk.LEFT)
+            tk.Frame(row, bg=C["border"], width=1).pack(side=tk.LEFT, fill=tk.Y)
+            lbl_normal = tk.Label(row, text="—", bg=row_bg, fg=C["text_dim"],
+                                  font=("Segoe UI", 9), anchor="w", padx=10, width=16)
+            lbl_normal.pack(side=tk.LEFT)
+            tk.Frame(row, bg=C["border"], width=1).pack(side=tk.LEFT, fill=tk.Y)
+            lbl_current = tk.Label(row, text="—", bg=row_bg, fg=C["text"],
+                                   font=("Segoe UI", 9, "bold"), anchor="w", padx=10, width=16)
+            lbl_current.pack(side=tk.LEFT)
+            lbl_indicator = tk.Label(row, text="", bg=row_bg, font=("Segoe UI", 9), padx=6)
+            lbl_indicator.pack(side=tk.LEFT)
+            store_dict[key] = {
+                "lbl_normal": lbl_normal,
+                "lbl_current": lbl_current,
+                "lbl_indicator": lbl_indicator,
+                "unit": unit,
+            }
+
+        # Footer row for similarity score
+        f_row = tk.Frame(card, bg="#f0f3f7", padx=12, pady=6)
+        f_row.pack(fill=tk.X)
+        lbl_footer = tk.Label(f_row, text=footer_default, bg="#f0f3f7", fg=C["text"],
+                              font=("Segoe UI", 9, "bold"))
+        lbl_footer.pack(side=tk.RIGHT)
+        setattr(self, footer_lbl_name, lbl_footer)
+
+    def _build_pattern_card(self, parent):
+        card = tk.Frame(parent, bg=C["surface"], highlightbackground=C["border"], highlightthickness=1)
+        card.pack(fill=tk.X, pady=(0, 8))
+
+        t_row = tk.Frame(card, bg=C["surface"], padx=12, pady=6)
+        t_row.pack(fill=tk.X)
+        tk.Label(t_row, text="🔄  Combined Pattern & Coordination Analysis", bg=C["surface"],
+                 fg=C["text"], font=("Segoe UI", 10, "bold")).pack(side=tk.LEFT)
+
+        hdr_row = tk.Frame(card, bg=C["border"])
+        hdr_row.pack(fill=tk.X)
+        for txt in ["Pattern Metric", "Your Normal", "Current", "Status"]:
+            tk.Label(hdr_row, text=txt, bg="#f0f3f7", fg=C["text"],
+                     font=("Segoe UI", 8, "bold"), anchor="w", padx=10, pady=4).pack(side=tk.LEFT, expand=True, fill=tk.X)
+
+        defs = [
+            ("coordination", "Input Coordination", "Normal", "—", "—"),
+            ("switch_latency", "KB→Mouse Switch Latency", "520 ± 180 ms", "—", "—"),
+            ("activity_corr", "Activity Correlation", "0.78", "—", "—"),
+        ]
+        for i, (k, label, norm_txt, cur_txt, stat_txt) in enumerate(defs):
+            row_bg = C["surface"] if i % 2 == 0 else "#fafbfc"
+            row = tk.Frame(card, bg=row_bg, padx=10, pady=5)
+            row.pack(fill=tk.X)
+            tk.Label(row, text=label, bg=row_bg, fg=C["text"], font=("Segoe UI", 9), anchor="w", width=24).pack(side=tk.LEFT)
+            tk.Label(row, text=norm_txt, bg=row_bg, fg=C["text_dim"], font=("Segoe UI", 9), anchor="w", width=18).pack(side=tk.LEFT)
+            lbl_c = tk.Label(row, text=cur_txt, bg=row_bg, fg=C["text"], font=("Segoe UI", 9, "bold"), anchor="w", width=18)
+            lbl_c.pack(side=tk.LEFT)
+            lbl_s = tk.Label(row, text=stat_txt, bg=row_bg, font=("Segoe UI", 9), anchor="w")
+            lbl_s.pack(side=tk.LEFT)
+            self._pattern_rows[k] = {"lbl_current": lbl_c, "lbl_status": lbl_s}
+
+        f_row = tk.Frame(card, bg="#f0f3f7", padx=12, pady=6)
+        f_row.pack(fill=tk.X)
+        self._pattern_sim_lbl = tk.Label(f_row, text="Pattern Similarity: —", bg="#f0f3f7", fg=C["text"],
+                                         font=("Segoe UI", 9, "bold"))
+        self._pattern_sim_lbl.pack(side=tk.RIGHT)
+
+    # -- Export Section (Feature 4 & UI integration) --
+
+    def _build_export_section(self) -> None:
+        export_card = tk.Frame(self._inner, bg=C["surface"],
+                               highlightbackground=C["border"], highlightthickness=1,
+                               padx=16, pady=14)
+        export_card.pack(fill=tk.X, padx=16, pady=(0, 8))
+
+        tk.Label(export_card, text="📦  Export Behavioral Data to JSON",
+                 bg=C["surface"], fg=C["text"],
+                 font=("Segoe UI", 11, "bold")).pack(anchor="w", pady=(0, 8))
+
+        # Buttons grid
+        btn_grid = tk.Frame(export_card, bg=C["surface"])
+        btn_grid.pack(fill=tk.X, pady=(0, 8))
+
+        # Column 1: Profiles
+        col1 = tk.Frame(btn_grid, bg=C["surface"])
+        col1.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
+        tk.Label(col1, text="Profile Baseline Export:", bg=C["surface"], fg=C["text_dim"],
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 4))
+        self._make_btn(col1, "📄 Export Keyboard Profile", self._export_keyboard_profile, C["btn_bg"], C["text"]).pack(fill=tk.X, pady=2)
+        self._make_btn(col1, "🖱️ Export Mouse Profile", self._export_mouse_profile, C["btn_bg"], C["text"]).pack(fill=tk.X, pady=2)
+        self._make_btn(col1, "📦 Export Combined Profile", self._export_combined_profile, C["btn_bg"], C["text"]).pack(fill=tk.X, pady=2)
+
+        # Column 2: Session & Reports
+        col2 = tk.Frame(btn_grid, bg=C["surface"])
+        col2.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 8))
+        tk.Label(col2, text="Session & Audit Export:", bg=C["surface"], fg=C["text_dim"],
+                 font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(0, 4))
+        self._make_btn(col2, "📊 Export Last Hour Session", lambda: self._export_session(60), C["btn_bg"], C["text"]).pack(fill=tk.X, pady=2)
+        self._make_btn(col2, "📈 Export 24h Daily Session", lambda: self._export_session(1440), C["btn_bg"], C["text"]).pack(fill=tk.X, pady=2)
+        self._make_btn(col2, "📋 Generate Comparison Report", self._export_comparison_report, C["btn_bg"], C["text"]).pack(fill=tk.X, pady=2)
+
+        # Privacy Toggles Row
+        priv_frame = tk.Frame(export_card, bg="#f8f9fa", padx=10, pady=6)
+        priv_frame.pack(fill=tk.X, pady=(4, 0))
+        tk.Label(priv_frame, text="Export Privacy Options:", bg="#f8f9fa", fg=C["text"], font=("Segoe UI", 8, "bold")).pack(side=tk.LEFT, padx=(0, 8))
+        self._anonymize_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(priv_frame, text="Anonymize Timestamps (T+0s)", variable=self._anonymize_var, bg="#f8f9fa", font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=4)
+
+    # -- Footer action buttons --
+
+    def _build_footer_buttons(self) -> None:
+        btn_frame = tk.Frame(self._inner, bg=C["bg"], pady=10)
+        btn_frame.pack(fill=tk.X, padx=16)
+
+        self._this_was_me_btn = self._make_btn(
+            btn_frame, "✅ This Was Me", self._this_was_me,
+            C["safe"], "white"
+        )
+        self._this_was_me_btn.pack(side=tk.LEFT, padx=(0, 8))
+
+        retrain_btn = self._make_btn(
+            btn_frame, "🔄 Retrain Profile", self._retrain,
+            C["suspicious"], "white"
+        )
+        retrain_btn.pack(side=tk.LEFT, padx=(0, 8))
+
+        view_json_btn = self._make_btn(
+            btn_frame, "📁 View Behavior JSON", self._view_my_behavior_json,
+            C["btn_bg"], C["text"]
+        )
+        view_json_btn.pack(side=tk.LEFT, padx=(0, 8))
+
+        settings_btn = self._make_btn(
+            btn_frame, "⚙️ Settings", self._show_settings,
+            C["btn_bg"], C["text"]
+        )
+        settings_btn.pack(side=tk.LEFT)
+
+    def _make_btn(self, parent, text, cmd, bg, fg):
+        btn = tk.Button(parent, text=text, command=cmd,
+                        bg=bg, fg=fg, relief=tk.FLAT,
+                        padx=12, pady=6, font=("Segoe UI", 9, "bold"),
+                        cursor="hand2", borderwidth=0)
+        btn.bind("<Enter>", lambda e, b=btn, c=bg: b.config(bg=_darken(c)))
+        btn.bind("<Leave>", lambda e, b=btn, c=bg: b.config(bg=c))
+        return btn
+
+    # ------------------------------------------------------------------
+    # Refresh & Updates
+    # ------------------------------------------------------------------
+
+    def _update_view_mode(self) -> None:
+        if not self._available or not self._engine:
+            return
+        training_done = self._engine.is_baseline_available
+        if training_done:
+            self._training_frame.pack_forget()
+            self._monitoring_frame.pack(fill=tk.X, padx=16, pady=0)
+        else:
+            self._monitoring_frame.pack_forget()
+            self._training_frame.pack(fill=tk.X, padx=16, pady=8)
+
+    def refresh(self) -> None:
+        if not self._available or not self._engine:
+            return
+        try:
+            self._refresh_training()
+            self._update_view_mode()
+            if self._engine.is_baseline_available:
+                self._refresh_monitoring()
+        except Exception as exc:
+            logger.debug("BehavioralAnalysisTab refresh error: %s", exc)
+
+    def _refresh_training(self) -> None:
+        prog = self._engine.get_training_progress()
+        pct = prog["percent"]
+        ks = prog["keystrokes_recorded"]
+        need_ks = prog["keystrokes_needed"]
+        mouse_moves = prog["mouse_movements"]
+        need_mouse = prog["mouse_needed"]
+
+        self._animate_progress(pct)
+
+        self._train_ks_lbl.config(text=f"{ks:,} / {need_ks:,}")
+        self._train_mouse_lbl.config(text=f"{mouse_moves:,} / {need_mouse:,}")
+
+        d, h = prog["elapsed_days"], prog["elapsed_hours"]
+        self._train_elapsed_lbl.config(text=f"{d}d {h}h")
+
+        eta_d, eta_h = prog["eta_days"], prog["eta_hours"]
+        if pct >= 100:
+            self._train_eta_lbl.config(text="Complete ✓", fg=C["safe"])
+        else:
+            self._train_eta_lbl.config(text=f"~{eta_d}d {eta_h}h", fg=C["text"])
+
+        km = self._engine.current_metrics
+        mm = self._engine.current_mouse_metrics
+        wpm_txt = f"{km.wpm:.0f} WPM" if km and km.is_sufficient else "Waiting typing..."
+        spd_txt = f"{mm.avg_speed_pxsec:.0f} px/s" if mm and mm.is_sufficient else "Waiting mouse..."
+        self._train_speed_lbl.config(text=f"{wpm_txt} | {spd_txt}")
+
+    def _animate_progress(self, target_pct: float) -> None:
+        """Smoothly glide progress bar towards target with cubic ease-out."""
+        target_pct = max(0.0, min(100.0, target_pct))
+        current_pct = getattr(self, "_current_anim_pct", 0.0)
+
+        diff = target_pct - current_pct
+        if abs(diff) < 0.25:
+            self._current_anim_pct = target_pct
+            self._prog_bar.place(relwidth=min(target_pct / 100.0, 1.0), relheight=1.0)
+            pct_color = C["safe"] if target_pct >= 100 else (C["suspicious"] if target_pct >= 50 else C["accent"])
+            self._prog_bar.config(bg=pct_color)
+            self._prog_pct_lbl.config(text=f"{target_pct:.1f}%")
+            return
+
+        step = diff * 0.25
+        new_pct = current_pct + step
+        self._current_anim_pct = new_pct
+        self._prog_bar.place(relwidth=min(new_pct / 100.0, 1.0), relheight=1.0)
+        pct_color = C["safe"] if new_pct >= 100 else (C["suspicious"] if new_pct >= 50 else C["accent"])
+        self._prog_bar.config(bg=pct_color)
+        self._prog_pct_lbl.config(text=f"{new_pct:.1f}%")
+
+        if self.winfo_exists():
+            self.after(25, lambda: self._animate_progress(target_pct))
+
+
+    def _refresh_monitoring(self) -> None:
+        a = self._engine.current_anomaly
+        km = self._engine.current_metrics
+        mm = self._engine.current_mouse_metrics
+        kb_bl = self._engine.baseline
+        mouse_bl = self._engine.mouse_baseline
+
+        if not a or not km or not kb_bl:
+            return
+
+        # Status banner
+        col, bg, lbl_txt = self._STATUS_COLORS.get(a.status, self._STATUS_COLORS["grey"])
+        self._status_banner.config(bg=bg)
+        self._status_icon_lbl.config(bg=bg)
+        self._status_title_lbl.config(bg=bg, fg=col, text=a.status_label)
+        self._similarity_lbl.config(bg=bg, text=f"Combined Similarity: {a.similarity_score:.0f}%")
+        self._duration_lbl.config(bg=bg)
+
+        # Anomaly duration
+        if a.status in ("orange", "red") and self._anomaly_start_ts is None:
+            self._anomaly_start_ts = time.time()
+        elif a.status in ("green", "yellow", "grey"):
+            self._anomaly_start_ts = None
+
+        if self._anomaly_start_ts:
+            dur_mins = int((time.time() - self._anomaly_start_ts) / 60)
+            dur_secs = int((time.time() - self._anomaly_start_ts) % 60)
+            self._duration_lbl.config(text=f"Duration: {dur_mins}m {dur_secs}s")
+        else:
+            self._duration_lbl.config(text="")
+
+        # Update Keyboard Table
+        kb_cur = {
+            "wpm": km.wpm,
+            "dwell_ms": km.avg_dwell_ms,
+            "consistency_stddev": km.consistency_stddev,
+            "burst_count": float(km.burst_count),
+        }
+        for k, v in kb_cur.items():
+            row_dict = self._kb_rows.get(k)
+            if not row_dict:
+                continue
+            bl_st = kb_bl.metrics.get(k)
+            if bl_st:
+                unit = row_dict["unit"]
+                row_dict["lbl_normal"].config(text=f"{bl_st.mean:.1f} ± {bl_st.std:.1f} {unit}")
+            z = a.z_scores.get(k, 0.0)
+            row_dict["lbl_current"].config(text=f"{v:.1f} {row_dict['unit']}")
+            ind = "✓ Normal" if z < 2.0 else ("🟡 Moderate" if z < 3.0 else "⚠️ Anomaly")
+            ind_fg = C["safe"] if z < 2.0 else (C["suspicious"] if z < 3.0 else C["malicious"])
+            row_dict["lbl_indicator"].config(text=ind, fg=ind_fg)
+
+        if hasattr(self, "_kb_sim_lbl"):
+            self._kb_sim_lbl.config(text=f"Keyboard Similarity: {a.keyboard_similarity:.0f}%")
+
+        # Update Mouse Table
+        if mm and mouse_bl:
+            m_cur = {
+                "speed_px_per_sec": mm.avg_speed_pxsec,
+                "curvature_index": mm.curvature_index,
+                "micro_movements": mm.micro_movements_per_sec,
+                "click_duration_ms": mm.avg_click_duration_ms,
+                "pauses_per_minute": float(mm.pause_frequency_per_min),
+            }
+            for k, v in m_cur.items():
+                row_dict = self._mouse_rows.get(k)
+                if not row_dict:
+                    continue
+                bl_st = mouse_bl.metrics.get(k)
+                if bl_st:
+                    row_dict["lbl_normal"].config(text=f"{bl_st.mean:.1f} ± {bl_st.std:.1f} {row_dict['unit']}")
+                z = a.mouse_z_scores.get(k, 0.0)
+                row_dict["lbl_current"].config(text=f"{v:.1f} {row_dict['unit']}")
+                ind = "✓ Normal" if z < 2.0 else ("🟡 Moderate" if z < 3.0 else "⚠️ Anomaly")
+                ind_fg = C["safe"] if z < 2.0 else (C["suspicious"] if z < 3.0 else C["malicious"])
+                row_dict["lbl_indicator"].config(text=ind, fg=ind_fg)
+
+            if hasattr(self, "_mouse_sim_lbl"):
+                self._mouse_sim_lbl.config(text=f"Mouse Similarity: {a.mouse_similarity:.0f}%")
+
+        # Update Pattern Table
+        if "coordination" in self._pattern_rows:
+            self._pattern_rows["coordination"]["lbl_current"].config(text=a.input_coordination)
+            self._pattern_rows["coordination"]["lbl_status"].config(
+                text="✓ Normal" if a.input_coordination == "Normal" else "⚠️ Anomaly",
+                fg=C["safe"] if a.input_coordination == "Normal" else C["malicious"]
+            )
+        if "switch_latency" in self._pattern_rows:
+            self._pattern_rows["switch_latency"]["lbl_current"].config(text=f"{a.kb_mouse_switch_latency_ms:.0f} ms")
+            self._pattern_rows["switch_latency"]["lbl_status"].config(text="✓ Normal", fg=C["safe"])
+        if "activity_corr" in self._pattern_rows:
+            self._pattern_rows["activity_corr"]["lbl_current"].config(text=f"{a.activity_correlation:.2f}")
+            self._pattern_rows["activity_corr"]["lbl_status"].config(
+                text="✓ Correlated" if a.activity_correlation >= 0.5 else "🟡 Low",
+                fg=C["safe"] if a.activity_correlation >= 0.5 else C["suspicious"]
+            )
+        if hasattr(self, "_pattern_sim_lbl"):
+            self._pattern_sim_lbl.config(text=f"Pattern Similarity: {a.pattern_similarity:.0f}%")
+
+        # Anomaly text
+        self._analysis_text.config(state=tk.NORMAL)
+        self._analysis_text.delete("1.0", tk.END)
+        if not a.explanations:
+            self._analysis_text.insert(tk.END, "✅ All keyboard and mouse biometrics within normal boundaries.", "ok_item")
+        else:
+            for exp in a.explanations:
+                tag = "red_item" if "⚠️" in exp or "🤖" in exp or "Z=" in exp or "Z-score" in exp else "yellow_item"
+                self._analysis_text.insert(tk.END, f"• {exp}\n", tag)
+        self._analysis_text.config(state=tk.DISABLED)
+
+        # Possible causes
+        if a.possible_causes:
+            self._causes_lbl.config(text="\n".join(f"• {c}" for c in a.possible_causes))
+        else:
+            self._causes_lbl.config(text="• Normal usage matching trained baseline.")
+
+        # Bot banner
+        if a.bot_detected:
+            self._bot_lbl.config(text=f"🤖  Bot Detected: {a.bot_type.replace('_', ' ').title()}")
+            ev_str = "\n".join(f"• {e}" for e in a.bot_evidence) if a.bot_evidence else a.bot_reason
+            self._bot_reason_lbl.config(text=f"{a.bot_reason}\n\nEvidence:\n{ev_str}")
+            self._bot_frame.pack(fill=tk.X, pady=(0, 8))
+        else:
+            self._bot_frame.pack_forget()
+
+        # History list
+        history = self._engine.recent_history[-10:]
+        self._history_text.config(state=tk.NORMAL)
+        self._history_text.delete("1.0", tk.END)
+        for ts, km_h, mm_h, anom_h in reversed(history):
+            ts_str = time.strftime("%H:%M", time.localtime(ts))
+            if anom_h is None or anom_h.similarity_score < 0:
+                tag, icon, score_str = "dim", "⬜", "collecting data"
+            else:
+                score = anom_h.similarity_score
+                if anom_h.bot_detected:
+                    tag, icon = "bad", "🤖"
+                elif anom_h.status == "red":
+                    tag, icon = "bad", "🔴"
+                elif anom_h.status == "orange":
+                    tag, icon = "bad", "⚠️"
+                elif anom_h.status == "yellow":
+                    tag, icon = "warn", "🟡"
+                else:
+                    tag, icon = "ok", "✅"
+                score_str = f"Combined: {score:.0f}% (KB: {anom_h.keyboard_similarity:.0f}%, Mouse: {anom_h.mouse_similarity:.0f}%)"
+            self._history_text.insert(
+                tk.END,
+                f"{ts_str}  {icon}  {anom_h.status_label if anom_h else 'Collecting...'}  —  {score_str}\n",
+                tag,
+            )
+        self._history_text.config(state=tk.DISABLED)
+
+    # ------------------------------------------------------------------
+    # Engine Callbacks
+    # ------------------------------------------------------------------
+
+    def _on_metrics_update(self, metrics) -> None:
+        self._last_metrics = metrics
+        if self._root_ref:
+            self._root_ref.after(0, self.refresh)
+
+    def _on_mouse_update(self, mouse_metrics) -> None:
+        if self._root_ref:
+            self._root_ref.after(0, self.refresh)
+
+    def _on_anomaly_alert(self, anomaly) -> None:
+        self._last_anomaly = anomaly
+        if self._root_ref:
+            self._root_ref.after(0, self._show_anomaly_toast)
+
+    def _show_anomaly_toast(self) -> None:
+        a = self._last_anomaly
+        if not a:
+            return
+        if a.bot_detected:
+            title = f"🤖 Bot Detected ({a.bot_type.replace('_', ' ').title()})"
+            msg = a.bot_reason or "Mechanical or automated input detected."
+        else:
+            title = "⚠️ Behavioral Anomaly Detected"
+            msg = f"Combined Similarity: {a.similarity_score:.0f}%\n" + (a.explanations[0] if a.explanations else "")
+        messagebox.showwarning(title, msg)
+
+    # ------------------------------------------------------------------
+    # JSON Export Handlers
+    # ------------------------------------------------------------------
+
+    def _export_keyboard_profile(self) -> None:
+        default_file = f"keyboard_behavior_{datetime.now():%Y%m%d_%H%M%S}.json"
+        path = filedialog.asksaveasfilename(
+            title="Export Keyboard Profile to JSON",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile=default_file,
+        )
+        if not path:
+            return
+        try:
+            exported = self._engine.export_keyboard_json(path)
+            messagebox.showinfo("Export Successful ✔", f"Keyboard Profile exported to:\n{exported}")
+        except Exception as exc:
+            messagebox.showerror("Export Failed", f"Could not export keyboard profile:\n{exc}")
+
+    def _export_mouse_profile(self) -> None:
+        default_file = f"mouse_behavior_{datetime.now():%Y%m%d_%H%M%S}.json"
+        path = filedialog.asksaveasfilename(
+            title="Export Mouse Profile to JSON",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile=default_file,
+        )
+        if not path:
+            return
+        try:
+            exported = self._engine.export_mouse_json(path)
+            messagebox.showinfo("Export Successful ✔", f"Mouse Profile exported to:\n{exported}")
+        except Exception as exc:
+            messagebox.showerror("Export Failed", f"Could not export mouse profile:\n{exc}")
+
+    def _export_combined_profile(self) -> None:
+        default_file = f"behavioral_profile_{datetime.now():%Y%m%d_%H%M%S}.json"
+        path = filedialog.asksaveasfilename(
+            title="Export Combined Multi-Modal Profile to JSON",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile=default_file,
+        )
+        if not path:
+            return
+        try:
+            exported = self._engine.export_combined_profile_json(path)
+            messagebox.showinfo("Export Successful ✔", f"Combined Profile exported to:\n{exported}")
+        except Exception as exc:
+            messagebox.showerror("Export Failed", f"Could not export combined profile:\n{exc}")
+
+    def _export_session(self, duration_mins: int = 60) -> None:
+        default_file = f"session_{datetime.now():%Y%m%d_%H%M%S}.json"
+        path = filedialog.asksaveasfilename(
+            title=f"Export Session Data ({duration_mins}m) to JSON",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile=default_file,
+        )
+        if not path:
+            return
+        try:
+            exported = self._engine.export_session_json(path, duration_mins=duration_mins)
+            messagebox.showinfo("Export Successful ✔", f"Session activity exported to:\n{exported}")
+        except Exception as exc:
+            messagebox.showerror("Export Failed", f"Could not export session data:\n{exc}")
+
+    def _export_comparison_report(self) -> None:
+        default_file = f"comparison_report_{datetime.now():%Y%m%d_%H%M%S}.json"
+        path = filedialog.asksaveasfilename(
+            title="Generate Comparison Report to JSON",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile=default_file,
+        )
+        if not path:
+            return
+        try:
+            exported = self._engine.export_comparison_json(path)
+            messagebox.showinfo("Export Successful ✔", f"Comparison report exported to:\n{exported}")
+        except Exception as exc:
+            messagebox.showerror("Export Failed", f"Could not export comparison report:\n{exc}")
+
+    # ------------------------------------------------------------------
+    # User Actions
+    # ------------------------------------------------------------------
+
+    def _toggle_enabled(self) -> None:
+        if not self._engine:
+            return
+        cur = self._engine.settings.get("enabled", True)
+        self._engine.settings["enabled"] = not cur
+        if not cur:
+            self._enabled_btn.config(text="● Enabled", bg=C["safe"])
+        else:
+            self._enabled_btn.config(text="○ Disabled", bg=C["text_dim"])
+
+    def _this_was_me(self) -> None:
+        if self._engine:
+            saved = self._engine.confirm_this_was_me()
+            messagebox.showinfo(
+                "Confirmed & Saved",
+                "✅ Session confirmed as yours!\n\n"
+                "Multi-modal telemetry saved to data/my_behavior.json.\n"
+                "Adaptive baseline updated with your latest patterns."
+            )
+
+    def _view_my_behavior_json(self) -> None:
+        path = self._engine.my_behavior_path if self._engine else Path(__file__).parent.parent.parent / "data" / "my_behavior.json"
+        if not path.exists():
+            messagebox.showinfo(
+                "No Saved Profile Yet",
+                f"File {path.name} will be created upon first baseline completion or confirmation."
+            )
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                content = f.read()
+        except Exception as exc:
+            messagebox.showerror("Error", f"Failed to read {path}: {exc}")
+            return
+
+        win = tk.Toplevel()
+        win.title(f"Behavioral Profile ({path.name})")
+        win.geometry("620x540")
+        win.configure(bg=C["bg"])
+
+        container = tk.Frame(win, bg=C["surface"], padx=18, pady=16)
+        container.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
+
+        tk.Label(container, text=f"📄 {path.name}", bg=C["surface"], fg=C["text"],
+                 font=("Segoe UI", 12, "bold")).pack(anchor="w")
+
+        text_area = scrolledtext.ScrolledText(
+            container, wrap=tk.WORD, font=("Consolas", 9),
+            bg="#f8f9fa", fg="#1f2937", borderwidth=1, relief=tk.SOLID
+        )
+        text_area.pack(fill=tk.BOTH, expand=True, pady=(8, 10))
+        text_area.insert(tk.END, content)
+        text_area.configure(state=tk.DISABLED)
+
+    def _retrain(self) -> None:
+        if not messagebox.askyesno(
+            "Retrain Multi-Modal Profile",
+            "This will reset your keyboard and mouse baselines and restart passive learning.\n\nContinue?"
+        ):
+            return
+        if self._engine:
+            self._engine.delete_training_data()
+        self._anomaly_start_ts = None
+        self._update_view_mode()
+        messagebox.showinfo("Retraining Started", "Baseline cleared. Collecting new multi-modal telemetry...")
+
+    def _show_settings(self) -> None:
+        if not self._engine:
+            return
+        win = tk.Toplevel()
+        win.title("Behavioral Biometrics Settings")
+        win.geometry("520x680")
+        win.configure(bg=C["bg"])
+        win.resizable(False, False)
+        win.grab_set()
+
+        container = tk.Frame(win, bg=C["surface"], padx=24, pady=20)
+        container.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
+
+        tk.Label(container, text="⚙️  Biometrics Detection Settings",
+                 bg=C["surface"], fg=C["text"],
+                 font=("Segoe UI", 13, "bold")).pack(anchor="w", pady=(0, 12))
+
+        s = self._engine.settings
+
+        tk.Label(container, text="Alert Threshold (Combined similarity % below = anomaly):",
+                 bg=C["surface"], fg=C["text"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        thresh_var = tk.DoubleVar(value=s.get("alert_threshold", 70.0))
+        tk.Scale(container, from_=40, to=90, variable=thresh_var, orient=tk.HORIZONTAL,
+                 bg=C["surface"], fg=C["text"], length=320, resolution=5).pack(anchor="w", pady=(2, 8))
+
+        tk.Label(container, text="Minimum suspicious duration before alert (seconds):",
+                 bg=C["surface"], fg=C["text"], font=("Segoe UI", 9, "bold")).pack(anchor="w")
+        dur_var = tk.IntVar(value=int(s.get("min_alert_duration", 120)))
+        tk.Scale(container, from_=30, to=300, variable=dur_var, orient=tk.HORIZONTAL,
+                 bg=C["surface"], fg=C["text"], length=320, resolution=30).pack(anchor="w", pady=(2, 8))
+
+        adapt_var = tk.BooleanVar(value=s.get("adaptive_baseline", True))
+        tk.Checkbutton(container, text="Update baseline adaptively with confirmed-normal sessions",
+                       variable=adapt_var, bg=C["surface"], font=("Segoe UI", 9)).pack(anchor="w", pady=2)
+
+        notify_var = tk.BooleanVar(value=s.get("desktop_notify", True))
+        tk.Checkbutton(container, text="Show desktop notification on multi-modal anomaly / bot",
+                       variable=notify_var, bg=C["surface"], font=("Segoe UI", 9)).pack(anchor="w", pady=2)
+
+        # Mouse Tracking Precision & Performance Section
+        mouse_box = tk.LabelFrame(container, text="🖱️ Mouse Tracking Precision & Performance",
+                                  bg=C["surface"], fg=C["text"], font=("Segoe UI", 9, "bold"),
+                                  padx=12, pady=8)
+        mouse_box.pack(fill=tk.X, pady=(10, 4))
+
+        mouse_track_var = tk.BooleanVar(value=s.get("mouse_tracking_enabled", True))
+        tk.Checkbutton(mouse_box, text="Enable Mouse Dynamics Tracking",
+                       variable=mouse_track_var, bg=C["surface"], font=("Segoe UI", 9, "bold"),
+                       fg=C["safe"]).pack(anchor="w", pady=(0, 4))
+
+        mouse_autopause_var = tk.BooleanVar(value=s.get("auto_pause_on_activity", True))
+        tk.Checkbutton(mouse_box, text="Auto-pause during high activity (gaming / design)",
+                       variable=mouse_autopause_var, bg=C["surface"], font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 6))
+
+        tk.Label(mouse_box, text="Tracking Precision Mode (Downsampling Rate):",
+                 bg=C["surface"], fg=C["text"], font=("Segoe UI", 8, "bold")).pack(anchor="w")
+
+        prec_var = tk.StringVar(value=s.get("mouse_precision", "normal"))
+        tk.Radiobutton(mouse_box, text="High (50 samples/sec - 20ms interval)",
+                       variable=prec_var, value="high", bg=C["surface"],
+                       font=("Segoe UI", 8)).pack(anchor="w")
+        tk.Radiobutton(mouse_box, text="Normal (20 samples/sec - 50ms interval) [Recommended / Smooth]",
+                       variable=prec_var, value="normal", bg=C["surface"],
+                       font=("Segoe UI", 8, "bold"), fg=C["safe"]).pack(anchor="w")
+        tk.Radiobutton(mouse_box, text="Low / Battery Saver (10 samples/sec - 100ms interval)",
+                       variable=prec_var, value="low", bg=C["surface"],
+                       font=("Segoe UI", 8)).pack(anchor="w")
+
+        stats = self._engine.get_mouse_performance_stats()
+        diag_txt = f"Performance: Callback <{stats.get('avg_callback_latency_ms', 0.05):.2f}ms | Priority: Low (Zero UI Lag)"
+        tk.Label(mouse_box, text=diag_txt, bg=C["surface"], fg=C["text_dim"],
+                 font=("Segoe UI", 8, "italic")).pack(anchor="w", pady=(4, 0))
+
+        btn_row = tk.Frame(container, bg=C["surface"])
+        btn_row.pack(anchor="e", pady=(14, 0))
+
+        def _save():
+            s["alert_threshold"] = thresh_var.get()
+            s["min_alert_duration"] = float(dur_var.get())
+            s["adaptive_baseline"] = adapt_var.get()
+            s["desktop_notify"] = notify_var.get()
+            s["mouse_tracking_enabled"] = mouse_track_var.get()
+            s["mouse_precision"] = prec_var.get()
+            s["auto_pause_on_activity"] = mouse_autopause_var.get()
+
+            # Apply directly to mouse recorder
+            self._engine.set_mouse_precision(prec_var.get())
+            self._engine.set_mouse_tracking_enabled(mouse_track_var.get())
+
+            win.destroy()
+            messagebox.showinfo("Settings Saved", "Biometrics and mouse performance settings updated.")
+
+        tk.Button(btn_row, text="Save", command=_save, bg=C["btn_primary"], fg="white",
+                  relief=tk.FLAT, padx=20, pady=8, font=("Segoe UI", 10, "bold"), cursor="hand2").pack(side=tk.LEFT, padx=(0, 8))
+        tk.Button(btn_row, text="Cancel", command=win.destroy, bg=C["btn_bg"], fg=C["text"],
+                  relief=tk.FLAT, padx=20, pady=8, font=("Segoe UI", 10), cursor="hand2").pack(side=tk.LEFT)
+
+
+
+def _darken(hex_color: str, factor: float = 0.85) -> str:
+    """Darken a hex color by a factor for hover effects."""
+    try:
+        h = hex_color.lstrip("#")
+        r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+        return "#{:02x}{:02x}{:02x}".format(
+            int(r * factor), int(g * factor), int(b * factor)
+        )
+    except Exception:
+        return hex_color
+
+
+# ---------------------------------------------------------------------------
 # System tray
 # ---------------------------------------------------------------------------
 
@@ -1738,14 +2961,22 @@ class Dashboard:
         self._notifications_enabled = True
 
         # Tabs (set after build)
-        self._live_tab:    Optional[_LiveAlertsTab]  = None
-        self._history_tab: Optional[_HistoryTab]     = None
-        self._stats_tab:   Optional[_StatsTab]       = None
-        self._train_tab:   Optional[_TrainModelTab]  = None  # NEW
+        self._live_tab:        Optional[_LiveAlertsTab]        = None
+        self._history_tab:     Optional[_HistoryTab]            = None
+        self._stats_tab:       Optional[_StatsTab]              = None
+        self._train_tab:       Optional[_TrainModelTab]         = None
+        self._behavioral_tab:  Optional[_BehavioralAnalysisTab] = None  # NEW Phase 1
+
+        # Behavioral engine (optional — set via set_behavioral_engine)
+        self._behavioral_engine = None
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def set_behavioral_engine(self, engine) -> None:
+        """Attach the BehavioralAnalysisEngine (called from main.py)."""
+        self._behavioral_engine = engine
 
     def run(self) -> None:
         """Build window and enter mainloop (blocks)."""
@@ -1782,23 +3013,38 @@ class Dashboard:
         nb.add(self._history_tab, text="  📋 History  ")
         nb.add(self._stats_tab,   text="  📊 Statistics  ")
         nb.add(self._train_tab,   text="  🎓 Train Model  ")
+
+        # Tab 5 — Behavioral Analysis (Phase 1)
+        self._behavioral_tab = _BehavioralAnalysisTab(
+            nb, engine=self._behavioral_engine
+        )
+        self._behavioral_tab.set_root_ref(self._root)
+        nb.add(self._behavioral_tab, text="  🧠 Behavior  ")
+
         nb.pack(fill=tk.BOTH, expand=True, padx=8, pady=8)
 
-        # Modern status bar with notification indicator
+        # Modern status bar with notification indicator and live breathing pulse
         status_container = tk.Frame(self._root, bg=C["surface"], 
                                    relief=tk.FLAT, borderwidth=1,
                                    highlightthickness=1, highlightbackground=C["border"])
         status_container.pack(fill=tk.X, side=tk.BOTTOM)
         
-        # Left side: status text
+        # Left side: status text with pulsating dot
         left_frame = tk.Frame(status_container, bg=C["surface"])
         left_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
         
-        self._status_var = tk.StringVar(value="✓ Monitoring active")
+        self._status_dot_lbl = tk.Label(
+            left_frame, text="●",
+            bg=C["surface"], fg=C["safe"],
+            font=("Segoe UI", 10, "bold"), padx=4, pady=8
+        )
+        self._status_dot_lbl.pack(side=tk.LEFT, padx=(12, 0))
+
+        self._status_var = tk.StringVar(value="Monitoring active")
         tk.Label(
             left_frame, textvariable=self._status_var,
             bg=C["surface"], fg=C["text"],
-            font=("Segoe UI", 9), anchor="w", padx=16, pady=8,
+            font=("Segoe UI", 9), anchor="w", padx=6, pady=8,
         ).pack(side=tk.LEFT)
         
         # Notification indicator (NEW)
@@ -1812,7 +3058,7 @@ class Dashboard:
         
         # Right side: version info
         tk.Label(
-            status_container, text="AI Keylogger Detection v1.0",
+            status_container, text="AI Keylogger Detection v2.5",
             bg=C["surface"], fg=C["text_light"],
             font=("Segoe UI", 8), anchor="e", padx=16,
         ).pack(side=tk.RIGHT)
@@ -1826,8 +3072,31 @@ class Dashboard:
         )
         self._tray.start()
 
+        # Start smooth live pulse animation
+        self._start_pulse_animation()
+
         self._root.after(UI_REFRESH_MS, self._tick)
         self._root.mainloop()
+
+    def _start_pulse_animation(self) -> None:
+        """Smooth breathing pulse animation for live monitoring indicator dot."""
+        pulse_colors = ["#27ae60", "#2ecc71", "#58d68d", "#2ecc71"]
+        self._pulse_idx = 0
+
+        def _pulse():
+            if not self._root:
+                return
+            try:
+                if self._root.winfo_exists() and hasattr(self, "_status_dot_lbl"):
+                    color = pulse_colors[self._pulse_idx % len(pulse_colors)]
+                    self._status_dot_lbl.config(fg=color)
+                    self._pulse_idx += 1
+                self._root.after(450, _pulse)
+            except Exception:
+                pass
+
+        _pulse()
+
 
     def show(self) -> None:
         """Bring window to front (thread-safe)."""
@@ -1844,6 +3113,11 @@ class Dashboard:
     def set_notifications_enabled(self, enabled: bool) -> None:
         """Enable or disable desktop notifications (NEW)."""
         self._notifications_enabled = enabled
+        try:
+            from ..live_api import set_notifications_enabled
+            set_notifications_enabled(enabled)
+        except Exception:
+            pass
         self._update_notification_indicator()
 
     # ------------------------------------------------------------------
@@ -1900,9 +3174,14 @@ class Dashboard:
         menubar.add_cascade(label="Tools", menu=tools_menu)
         tools_menu.add_command(label="Clear Live Alerts", 
                               command=self._clear_live_alerts)
-        tools_menu.add_command(label="Export History...", 
-                              command=self._export_history,
-                              state=tk.DISABLED)  # TODO: Implement
+        # Export sub-menu (Feature 5 & 6)
+        export_menu = tk.Menu(tools_menu, tearoff=0, bg=C["surface"], fg=C["text"],
+                             activebackground=C["accent"], activeforeground="white")
+        tools_menu.add_cascade(label="Export History", menu=export_menu)
+        export_menu.add_command(label="💾 Export to CSV...",
+                               command=self._export_to_csv)
+        export_menu.add_command(label="📄 Export to PDF...",
+                               command=self._export_to_pdf)
         tools_menu.add_separator()
         tools_menu.add_command(label="Settings", 
                               command=self._show_settings)
@@ -1924,8 +3203,7 @@ class Dashboard:
 
     def _toggle_notifications(self) -> None:
         """Toggle notification enable/disable (NEW)."""
-        self._notifications_enabled = not self._notifications_enabled
-        self._update_notification_indicator()
+        self.set_notifications_enabled(not self._notifications_enabled)
         
         # Show confirmation
         status = "enabled" if self._notifications_enabled else "disabled"
@@ -1980,10 +3258,286 @@ class Dashboard:
             self._status_var.set("✓ Live alerts cleared")
 
     def _export_history(self) -> None:
-        """Export detection history (NEW - placeholder for future feature)."""
-        messagebox.showinfo("Export History",
-                           "Export feature coming in v1.1!\n\n"
-                           "Will support: CSV, JSON, PDF formats")
+        """Legacy entry point — now superseded by _export_to_csv / _export_to_pdf."""
+        self._export_to_csv()
+
+    def _export_to_csv(self) -> None:
+        """
+        Feature 5: Export full detection history to a CSV file.
+
+        Opens a save-file dialog, queries all detections from the database,
+        and writes a UTF-8-with-BOM CSV so Excel opens it correctly.
+        """
+        # --- file picker ---
+        docs_dir = Path.home() / "Documents"
+        default_name = f"keyguard_detections_{datetime.now():%Y%m%d_%H%M%S}.csv"
+        filepath = filedialog.asksaveasfilename(
+            title="Export Detection History to CSV",
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialdir=str(docs_dir) if docs_dir.exists() else str(Path.home()),
+            initialfile=default_name,
+        )
+        if not filepath:
+            return   # user cancelled
+
+        # --- query all detections ---
+        try:
+            rows = self._db.query_detections(limit=100_000)
+        except Exception as exc:
+            messagebox.showerror("Export Failed",
+                                 f"Could not read database:\n{exc}")
+            return
+
+        # --- write CSV ---
+        COLUMNS = [
+            "detected_at", "process_name", "pid", "risk_level",
+            "score", "confidence", "reasons", "exe_path",
+            "model_version", "actioned",
+        ]
+        try:
+            with open(filepath, "w", newline="", encoding="utf-8-sig") as fh:
+                writer = csv.DictWriter(
+                    fh,
+                    fieldnames=COLUMNS,
+                    extrasaction="ignore",
+                )
+                writer.writeheader()
+                for row in rows:
+                    # Format timestamp as human-readable string
+                    ts_raw = row.get("detected_at", 0)
+                    row["detected_at"] = _fmt_datetime(ts_raw) if ts_raw else ""
+                    # Round score to 4 decimal places
+                    score = row.get("score", 0)
+                    row["score"] = f"{float(score):.4f}" if score is not None else "0"
+                    confidence = row.get("confidence", 0)
+                    row["confidence"] = f"{float(confidence):.4f}" if confidence is not None else "0"
+                    # Flatten reasons list to a semicolon-separated string
+                    reasons = row.get("reasons", [])
+                    if isinstance(reasons, list):
+                        row["reasons"] = "; ".join(reasons)
+                    row["actioned"] = "Yes" if row.get("actioned") else "No"
+                    writer.writerow(row)
+
+        except PermissionError:
+            messagebox.showerror(
+                "Export Failed",
+                f"Cannot write to:\n{filepath}\n\n"
+                "The file may be open in another application (e.g. Excel).\n"
+                "Close it and try again."
+            )
+            return
+        except OSError as exc:
+            messagebox.showerror("Export Failed",
+                                 f"File system error:\n{exc}")
+            return
+
+        messagebox.showinfo(
+            "Export Successful ✔",
+            f"Exported {len(rows)} record(s) to:\n{filepath}"
+        )
+
+    def _export_to_pdf(self) -> None:
+        """
+        Feature 6 (Bonus): Generate a professional PDF detection report.
+
+        Requires the fpdf2 package (pip install fpdf2).  If not installed,
+        the user is shown a friendly prompt with the install command.
+
+        Report structure
+        ----------------
+        Page 1  – Cover: title, date range, summary stats box
+        Page 2+ – Detailed table: one row per detection, colour-coded risk,
+                   alternating row shading, auto-pagination, page numbers.
+        """
+        # --- check fpdf2 is available ---
+        try:
+            from fpdf import FPDF  # fpdf2
+        except ImportError:
+            messagebox.showwarning(
+                "Missing Dependency",
+                "PDF export requires the 'fpdf2' package.\n\n"
+                "Install it by running:\n"
+                "    pip install fpdf2\n\n"
+                "Then restart the application."
+            )
+            return
+
+        # --- file picker ---
+        docs_dir = Path.home() / "Documents"
+        default_name = f"keyguard_report_{datetime.now():%Y%m%d_%H%M%S}.pdf"
+        filepath = filedialog.asksaveasfilename(
+            title="Export Detection Report to PDF",
+            defaultextension=".pdf",
+            filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+            initialdir=str(docs_dir) if docs_dir.exists() else str(Path.home()),
+            initialfile=default_name,
+        )
+        if not filepath:
+            return
+
+        # --- fetch data ---
+        try:
+            rows = self._db.query_detections(limit=100_000)
+            stats = self._db.stats()
+        except Exception as exc:
+            messagebox.showerror("Export Failed",
+                                 f"Could not read database:\n{exc}")
+            return
+
+        # --- helper: risk colour as (R, G, B) tuple ---
+        RISK_COLORS = {
+            "malicious":  (231, 76, 60),    # red
+            "suspicious": (243, 156, 18),   # orange
+            "safe":       (39, 174, 96),     # green
+        }
+
+        # --- build PDF ---
+        try:
+            pdf = FPDF(orientation="L", unit="mm", format="A4")
+            pdf.set_auto_page_break(auto=True, margin=15)
+            pdf.set_margins(15, 15, 15)
+
+            # ── Cover page ──────────────────────────────────────────
+            pdf.add_page()
+
+            # Title bar
+            pdf.set_fill_color(41, 128, 185)   # blue
+            pdf.rect(0, 0, 297, 40, style="F")
+            pdf.set_text_color(255, 255, 255)
+            pdf.set_font("Helvetica", "B", 22)
+            pdf.set_xy(15, 10)
+            pdf.cell(267, 12, "KeyGuard AI — Detection Report", ln=True, align="C")
+            pdf.set_font("Helvetica", "", 11)
+            pdf.set_xy(15, 24)
+            pdf.cell(267, 8,
+                     f"Generated: {datetime.now():%Y-%m-%d %H:%M:%S}",
+                     align="C")
+
+            pdf.set_text_color(44, 62, 80)
+            pdf.ln(20)
+
+            # Summary stats box
+            pdf.set_fill_color(232, 244, 248)   # light blue tint
+            pdf.set_draw_color(189, 195, 199)
+            pdf.set_font("Helvetica", "B", 13)
+            pdf.cell(0, 10, "Summary", ln=True)
+            pdf.set_font("Helvetica", "", 11)
+
+            summary_items = [
+                ("Total Detections",  stats.get("total_detections", 0)),
+                ("Malicious",         stats.get("malicious_count",  0)),
+                ("Suspicious",        stats.get("suspicious_count", 0)),
+                ("Actions Taken",     stats.get("actioned_count",   0)),
+            ]
+            for label, value in summary_items:
+                pdf.set_fill_color(232, 244, 248)
+                pdf.cell(80, 9, f"  {label}:", border="LTB", fill=True)
+                pdf.cell(40, 9, str(value), border="RTB", fill=True, ln=True)
+
+            # ── Detail table pages ───────────────────────────────────
+            pdf.add_page()
+
+            # Column definitions: (header text, width in mm)
+            COL_DEFS = [
+                ("Date/Time",  48),
+                ("Process",    45),
+                ("PID",        18),
+                ("Risk",       25),
+                ("Score",      18),
+                ("Confidence", 20),
+                ("Actioned",   18),
+                ("Indicators", 75),
+            ]
+
+            # Table header
+            def _draw_header():
+                pdf.set_fill_color(41, 128, 185)
+                pdf.set_text_color(255, 255, 255)
+                pdf.set_font("Helvetica", "B", 9)
+                for hdr, w in COL_DEFS:
+                    pdf.cell(w, 8, hdr, border=1, fill=True, align="C")
+                pdf.ln()
+                pdf.set_text_color(44, 62, 80)
+
+            _draw_header()
+
+            # Table rows
+            pdf.set_font("Helvetica", "", 8)
+            for i, row in enumerate(rows):
+                # Auto-add a new page + header when near bottom
+                if pdf.get_y() > pdf.h - 25:
+                    pdf.add_page()
+                    _draw_header()
+                    pdf.set_font("Helvetica", "", 8)
+
+                risk_val = (row.get("risk_level") or "safe").lower()
+                r, g, b = RISK_COLORS.get(risk_val, (44, 62, 80))
+
+                # Alternating row shading
+                if i % 2 == 0:
+                    pdf.set_fill_color(248, 249, 250)
+                else:
+                    pdf.set_fill_color(255, 255, 255)
+
+                ts_raw = row.get("detected_at", 0)
+                ts_str = _fmt_datetime(ts_raw) if ts_raw else ""
+
+                reasons = row.get("reasons", [])
+                if isinstance(reasons, list):
+                    reasons_str = "; ".join(reasons[:2])
+                else:
+                    reasons_str = str(reasons)
+                # Truncate long indicator strings
+                if len(reasons_str) > 80:
+                    reasons_str = reasons_str[:77] + "..."
+
+                row_data = [
+                    (ts_str,                                        COL_DEFS[0][1]),
+                    (str(row.get("process_name", ""))[:30],         COL_DEFS[1][1]),
+                    (str(row.get("pid", "")),                       COL_DEFS[2][1]),
+                    (risk_val.upper(),                               COL_DEFS[3][1]),
+                    (f"{float(row.get('score', 0)):.1%}",           COL_DEFS[4][1]),
+                    (f"{float(row.get('confidence', 0)):.1%}",      COL_DEFS[5][1]),
+                    ("Yes" if row.get("actioned") else "No",        COL_DEFS[6][1]),
+                    (reasons_str,                                    COL_DEFS[7][1]),
+                ]
+
+                for j, (text, w) in enumerate(row_data):
+                    # Colour-code the Risk column
+                    if j == 3:
+                        pdf.set_text_color(r, g, b)
+                        pdf.set_font("Helvetica", "B", 8)
+                    else:
+                        pdf.set_text_color(44, 62, 80)
+                        pdf.set_font("Helvetica", "", 8)
+                    pdf.cell(w, 7, text, border=1, fill=(j != 3),
+                             align="C" if j in (2, 4, 5, 6) else "L")
+
+                pdf.ln()
+
+            # Page numbers in footer (iterate pages)
+            total_pages = pdf.page
+            for pg in range(1, total_pages + 1):
+                pdf.page = pg
+                pdf.set_y(-12)
+                pdf.set_font("Helvetica", "I", 8)
+                pdf.set_text_color(150, 150, 150)
+                pdf.cell(0, 8,
+                         f"KeyGuard AI Detection Report  •  Page {pg} of {total_pages}",
+                         align="C")
+
+            pdf.output(filepath)
+
+        except Exception as exc:
+            messagebox.showerror("Export Failed",
+                                 f"PDF generation error:\n{exc}")
+            return
+
+        messagebox.showinfo(
+            "Export Successful ✔",
+            f"PDF report ({len(rows)} record(s)) saved to:\n{filepath}"
+        )
 
     def _show_settings(self) -> None:
         """Show settings dialog (NEW)."""
@@ -2230,6 +3784,11 @@ class Dashboard:
             self._live_tab.refresh()
         if self._stats_tab:
             self._stats_tab.refresh()
+        if self._behavioral_tab:
+            try:
+                self._behavioral_tab.refresh()
+            except Exception:
+                pass
 
         if self._root:
             self._root.after(UI_REFRESH_MS, self._tick)

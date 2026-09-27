@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.concentric-loading {
+  width: min(176px, 48vw);
+  aspect-ratio: 1;
+  margin-inline: auto;
+  filter: drop-shadow(0 0 14px rgb(0 240 255 / 12%));
+}
+
+.concentric-loading svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.concentric-ring {
+  transform-box: view-box;
+  transform-origin: 160px 160px;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+}
+
+.concentric-ring path {
+  vector-effect: non-scaling-stroke;
+}
+
+.concentric-ring--outer {
+  animation: concentric-spin 24s linear infinite;
+  stroke: #00f0ff;
+  filter: drop-shadow(0 0 6px rgb(0 240 255 / 85%)) drop-shadow(0 0 16px rgb(0 240 255 / 38%));
+}
+
+.concentric-ring--middle {
+  animation: concentric-spin-reverse 18s linear infinite;
+  stroke: #ff1687;
+  filter: drop-shadow(0 0 6px rgb(255 22 135 / 78%)) drop-shadow(0 0 14px rgb(255 22 135 / 32%));
+}
+
+.concentric-ring--inner {
+  animation: concentric-spin 12s linear infinite;
+  stroke: #4389ff;
+  filter: drop-shadow(0 0 6px rgb(67 137 255 / 82%)) drop-shadow(0 0 14px rgb(67 137 255 / 34%));
+}
+
+@keyframes concentric-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes concentric-spin-reverse {
+  to { transform: rotate(-360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .concentric-ring--outer,
+  .concentric-ring--middle,
+  .concentric-ring--inner {
+    animation: none;
+  }
+}

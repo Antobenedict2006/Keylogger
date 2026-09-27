@@ -1,0 +1,36 @@
+{
+  "labels": [
+    "safe",
+    "suspicious",
+    "malicious"
+  ],
+  "version": "1.0",
+  "model_type": "gb",
+  "features": [
+    "hook_api_present",
+    "has_ll_keyboard_hook",
+    "hook_related_dll_count",
+    "has_visible_window",
+    "window_count",
+    "cpu_mean",
+    "cpu_max",
+    "mem_rss_mb_mean",
+    "file_write_bytes_sum",
+    "file_write_rate",
+    "open_file_count_mean",
+    "net_connections_mean",
+    "net_bytes_sent_sum",
+    "is_signed",
+    "is_system_process",
+    "has_startup_entry",
+    "no_exe_path",
+    "cmdline_empty",
+    "name_length",
+    "running_from_temp",
+    "running_from_appdata",
+    "age_seconds",
+    "hook_no_window",
+    "hook_with_network"
+  ],
+  "trained_at": "2026-09-19T13:06:29Z"
+}

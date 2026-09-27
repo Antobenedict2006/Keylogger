@@ -1,0 +1,80 @@
+{
+  "_comment": "Confirmed multi-modal behavioral snapshots (saved via 'This Was Me').",
+  "_privacy": "Only timing & motion dynamics stored. No screen content or key characters.",
+  "last_confirmed": "2026-09-24T22:22:08.493904",
+  "total_confirmations": 3,
+  "latest_session": {
+    "timestamp": "2026-09-24T22:22:08.493904",
+    "keystroke_count": 413,
+    "wpm": 82.6,
+    "dwell_ms": 187.13,
+    "flight_ms": 453.97,
+    "consistency_stddev": 393.72,
+    "mouse_speed_pxsec": 527.25,
+    "mouse_curvature": 2.09,
+    "mouse_clicks": 5,
+    "anomaly_assessment": {
+      "similarity_score": 25.0,
+      "keyboard_similarity": 100.0,
+      "mouse_similarity": 0.0,
+      "status": "red",
+      "status_label": "\ud83d\udd34 Anomaly Detected"
+    }
+  },
+  "history": [
+    {
+      "timestamp": "2026-09-24T22:14:21.342109",
+      "keystroke_count": 0,
+      "wpm": 0.0,
+      "dwell_ms": 0.0,
+      "flight_ms": 0.0,
+      "consistency_stddev": 0.0,
+      "mouse_speed_pxsec": 380.6,
+      "mouse_curvature": 2.02,
+      "mouse_clicks": 3,
+      "anomaly_assessment": {
+        "similarity_score": 25.0,
+        "keyboard_similarity": 100.0,
+        "mouse_similarity": 0.0,
+        "status": "red",
+        "status_label": "\ud83d\udd34 Anomaly Detected"
+      }
+    },
+    {
+      "timestamp": "2026-09-24T22:17:30.172545",
+      "keystroke_count": 122,
+      "wpm": 24.4,
+      "dwell_ms": 153.58,
+      "flight_ms": 457.76,
+      "consistency_stddev": 402.36,
+      "mouse_speed_pxsec": 576.27,
+      "mouse_curvature": 1.09,
+      "mouse_clicks": 2,
+      "anomaly_assessment": {
+        "similarity_score": 17.0,
+        "keyboard_similarity": 0.0,
+        "mouse_similarity": 0.0,
+        "status": "red",
+        "status_label": "\ud83d\udd34 Anomaly Detected"
+      }
+    },
+    {
+      "timestamp": "2026-09-24T22:22:08.493904",
+      "keystroke_count": 413,
+      "wpm": 82.6,
+      "dwell_ms": 187.13,
+      "flight_ms": 453.97,
+      "consistency_stddev": 393.72,
+      "mouse_speed_pxsec": 527.25,
+      "mouse_curvature": 2.09,
+      "mouse_clicks": 5,
+      "anomaly_assessment": {
+        "similarity_score": 25.0,
+        "keyboard_similarity": 100.0,
+        "mouse_similarity": 0.0,
+        "status": "red",
+        "status_label": "\ud83d\udd34 Anomaly Detected"
+      }
+    }
+  ]
+}

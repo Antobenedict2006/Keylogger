@@ -50,8 +50,21 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.monitor          import ProcessMonitor, ProcessSnapshot
 from src.feature_extractor import FeatureExtractor, FeatureVector
 from src.classifier        import KeyloggerClassifier, RiskLevel
-from src.alert_manager     import AlertManager, ActionResult, ResponseAction, _send_desktop_notification
+from src.alert_manager     import AlertManager, ActionResult, ResponseAction
 from src.db_logger         import DBLogger
+from src.live_api          import start as _start_live_api, stop as _stop_live_api, \
+                                   update_scan_results as _update_live_api, \
+                                   build_result_dict as _build_live_result, \
+                                   set_components as _set_live_components, \
+                                   get_notifications_enabled as _get_notifications_enabled
+
+# Behavioral analysis (Phase 1) — optional, degrades gracefully if pynput absent
+try:
+    from src.behavioral_analyzer import BehavioralAnalysisEngine
+    from src.db_logger import TypingBehaviorStore
+    _BEHAVIORAL_AVAILABLE = True
+except ImportError:
+    _BEHAVIORAL_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 # Logging configuration
@@ -193,6 +206,21 @@ class DetectionPipeline:
 
         # Stage 4c: Log raw snapshots (if enabled)
         self._db.log_snapshots_batch(snapshots)
+
+        # Stage 4d: Push ALL results to the live web dashboard
+        # Build the web-friendly dict for every classified process and
+        # stream it to the Flask bridge so the Next.js UI can display it.
+        fv_map_all = {fv.pid: fv for fv in feature_vectors}
+        try:
+            web_results = [
+                _build_live_result(cr, fv_map_all[cr.pid])
+                for cr in results
+                if cr.pid in fv_map_all
+            ]
+            if web_results:
+                _update_live_api(web_results)
+        except Exception as _live_exc:
+            logger.debug("live_api update skipped: %s", _live_exc)
 
         self._last_scan_time = time.time() - scan_start
 
@@ -351,6 +379,52 @@ def main() -> int:
     logger.info("Monitor started (scan interval: %.1fs).", args.scan_interval)
 
     # ------------------------------------------------------------------
+    # 5b. Behavioral Analysis Engine (Phase 1)
+    # ------------------------------------------------------------------
+    behavioral_engine = None
+    if _BEHAVIORAL_AVAILABLE:
+        try:
+            typing_store = TypingBehaviorStore(db_logger)
+            typing_store.ensure_schema()
+            behavioral_engine = BehavioralAnalysisEngine(
+                db_store=typing_store,
+                baseline_path=PROJECT_ROOT / "data" / "typing_baseline.json",
+            )
+            started = behavioral_engine.start()
+            if started:
+                logger.info("BehavioralAnalysisEngine started (pynput listener active).")
+            else:
+                logger.warning(
+                    "BehavioralAnalysisEngine: pynput listener could not start. "
+                    "Behavioral Analysis tab will show error message."
+                )
+        except Exception as exc:
+            logger.warning("Could not start behavioral engine: %s", exc)
+            behavioral_engine = None
+    else:
+        logger.info("Behavioral analysis module not available (pynput not installed).")
+
+    # Wire the live web API to the same component instances used by the desktop UI.
+    _set_live_components(
+        alert_manager=alert_mgr,
+        db_logger=db_logger,
+        classifier=classifier,
+        behavioral_engine=behavioral_engine,
+    )
+    _start_live_api()
+    logger.info("Live API bridge running on http://127.0.0.1:8765")
+
+    # Keep web and desktop notification preferences connected to the same state.
+    import src.alert_manager as alert_manager_module
+    original_send_notification = alert_manager_module._send_desktop_notification
+
+    def _send_notification_if_enabled(result) -> None:
+        if _get_notifications_enabled():
+            original_send_notification(result)
+
+    alert_manager_module._send_desktop_notification = _send_notification_if_enabled
+
+    # ------------------------------------------------------------------
     # 6. UI  (or headless)
     # ------------------------------------------------------------------
     exit_code = 0
@@ -379,20 +453,12 @@ def main() -> int:
                 get_model_status=pipeline.model_status,
                 on_pause=_on_pause,
                 on_quit=_on_quit,
-                get_classifier=lambda: classifier,   # NEW: lets Train tab reload model
+                get_classifier=lambda: classifier,   # lets Train tab reload model
             )
-            
-            # Wire notification toggle to alert manager
-            # We'll monkey-patch the notification sender to check dashboard state
-            original_send_notif = _send_desktop_notification
-            
-            def _send_with_check(result):
-                if dashboard.are_notifications_enabled():
-                    original_send_notif(result)
-            
-            # Replace the notification sender in the alert_manager module
-            import src.alert_manager
-            src.alert_manager._send_desktop_notification = _send_with_check
+
+            # Wire behavioral engine to dashboard (Phase 1)
+            if behavioral_engine is not None:
+                dashboard.set_behavioral_engine(behavioral_engine)
             
             dashboard.run()   # blocks until window closed / quit
 
@@ -413,7 +479,16 @@ def main() -> int:
     except Exception:
         pass
     try:
+        if behavioral_engine is not None:
+            behavioral_engine.stop()
+    except Exception:
+        pass
+    try:
         db_logger.close()
+    except Exception:
+        pass
+    try:
+        _stop_live_api()
     except Exception:
         pass
 

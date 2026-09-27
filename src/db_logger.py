@@ -774,3 +774,310 @@ class BehaviorRecordingStore:
             rows_before, session_id,
         )
         return rows_before
+
+
+# ===========================================================================
+# Typing & Mouse Behavior Store  (Phase 1 & 2 — Behavioral Biometrics)
+# ===========================================================================
+
+_TYPING_BEHAVIOR_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS typing_behavior (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp           DATETIME DEFAULT CURRENT_TIMESTAMP,
+    recorded_at         REAL     NOT NULL,
+    wpm                 REAL,
+    avg_dwell_ms        REAL,
+    avg_flight_ms       REAL,
+    consistency_stddev  REAL,
+    burst_count         INTEGER,
+    keystroke_count     INTEGER,
+    is_training_data    BOOLEAN  DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS mouse_behavior (
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp                   DATETIME DEFAULT CURRENT_TIMESTAMP,
+    recorded_at                 REAL     NOT NULL,
+    avg_speed_pxsec             REAL,
+    curvature_index             REAL,
+    micro_movements_per_sec     REAL,
+    jitter_stddev_px            REAL,
+    avg_click_duration_ms       REAL,
+    avg_double_click_ms         REAL,
+    click_to_move_latency_ms    REAL,
+    pause_frequency_per_min     INTEGER,
+    acceleration_avg            REAL,
+    scroll_lines_per_scroll     REAL,
+    overshoot_frequency         REAL,
+    left_right_click_ratio      REAL,
+    is_training_data            BOOLEAN  DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS behavioral_alerts (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp           DATETIME DEFAULT CURRENT_TIMESTAMP,
+    alerted_at          REAL     NOT NULL,
+    similarity_score    REAL,
+    duration_seconds    INTEGER,
+    wpm_current         REAL,
+    wpm_baseline        REAL,
+    wpm_zscore          REAL,
+    dwell_current       REAL,
+    dwell_baseline      REAL,
+    consistency_stddev  REAL,
+    alert_type          TEXT,
+    explanations_json   TEXT,
+    user_feedback       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_typing_behavior_time
+    ON typing_behavior(recorded_at);
+
+CREATE INDEX IF NOT EXISTS idx_mouse_behavior_time
+    ON mouse_behavior(recorded_at);
+
+CREATE INDEX IF NOT EXISTS idx_behavioral_alerts_time
+    ON behavioral_alerts(alerted_at);
+"""
+
+
+class TypingBehaviorStore:
+    """
+    Thin wrapper around an existing DBLogger connection that persists
+    typing and mouse behavior samples and behavioral alerts for
+    Behavioral Biometrics (Phase 1 & 2).
+
+    All timing & motion data is stored without screen/key content (privacy-safe).
+
+    Usage::
+
+        store = TypingBehaviorStore(db_logger)
+        store.ensure_schema()
+
+        store.log_typing_sample(metrics)
+        store.log_mouse_sample(mouse_metrics)
+        store.log_behavioral_alert(anomaly, metrics)
+        rows = store.query_recent_samples(limit=100)
+    """
+
+    def __init__(self, db_logger: "DBLogger") -> None:
+        self._db = db_logger
+
+    # ------------------------------------------------------------------
+    # Schema
+    # ------------------------------------------------------------------
+
+    def ensure_schema(self) -> None:
+        """Create typing_behavior, mouse_behavior and behavioral_alerts tables if absent."""
+        try:
+            with self._db._lock:
+                self._db._conn.executescript(_TYPING_BEHAVIOR_SCHEMA_SQL)
+                self._db._conn.commit()
+            logger.debug("TypingBehaviorStore schema ensured.")
+        except Exception as exc:
+            logger.error("TypingBehaviorStore schema error: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Write
+    # ------------------------------------------------------------------
+
+    def log_typing_sample(self, metrics, is_training: bool = True) -> None:
+        """
+        Persist one 60-second TypingMetrics window to the database.
+        Only timing numbers are stored — no key content.
+        """
+        self._db._execute(
+            """
+            INSERT INTO typing_behavior
+                (recorded_at, wpm, avg_dwell_ms, avg_flight_ms,
+                 consistency_stddev, burst_count, keystroke_count, is_training_data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                time.time(),
+                round(float(getattr(metrics, "wpm", 0.0)), 3),
+                round(float(getattr(metrics, "avg_dwell_ms", 0.0)), 3),
+                round(float(getattr(metrics, "avg_flight_ms", 0.0)), 3),
+                round(float(getattr(metrics, "consistency_stddev", 0.0)), 3),
+                int(getattr(metrics, "burst_count", 0)),
+                int(getattr(metrics, "keystroke_count", 0)),
+                int(is_training),
+            ),
+        )
+
+    def log_mouse_sample(self, metrics, is_training: bool = True) -> None:
+        """
+        Persist one 60-second MouseMetrics window to the database.
+        Only motion metrics are stored — no screen content.
+        """
+        self._db._execute(
+            """
+            INSERT INTO mouse_behavior
+                (recorded_at, avg_speed_pxsec, curvature_index,
+                 micro_movements_per_sec, jitter_stddev_px,
+                 avg_click_duration_ms, avg_double_click_ms,
+                 click_to_move_latency_ms, pause_frequency_per_min,
+                 acceleration_avg, scroll_lines_per_scroll,
+                 overshoot_frequency, left_right_click_ratio, is_training_data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                time.time(),
+                round(float(getattr(metrics, "avg_speed_pxsec", 0.0)), 3),
+                round(float(getattr(metrics, "curvature_index", 1.0)), 3),
+                round(float(getattr(metrics, "micro_movements_per_sec", 0.0)), 3),
+                round(float(getattr(metrics, "jitter_stddev_px", 0.0)), 3),
+                round(float(getattr(metrics, "avg_click_duration_ms", 0.0)), 3),
+                round(float(getattr(metrics, "avg_double_click_ms", 0.0)), 3),
+                round(float(getattr(metrics, "click_to_move_latency_ms", 0.0)), 3),
+                int(getattr(metrics, "pause_frequency_per_min", 0)),
+                round(float(getattr(metrics, "acceleration_avg", 0.0)), 3),
+                round(float(getattr(metrics, "scroll_lines_per_scroll", 0.0)), 3),
+                round(float(getattr(metrics, "overshoot_frequency", 0.0)), 3),
+                round(float(getattr(metrics, "left_right_click_ratio", 15.0)), 3),
+                int(is_training),
+            ),
+        )
+
+    def log_behavioral_alert(self, anomaly, metrics=None) -> None:
+        """Persist a detected anomaly alert row."""
+        alert_type = (
+            getattr(anomaly, "bot_type", None) or
+            ("bot_detected" if getattr(anomaly, "bot_detected", False) else "human_different")
+        )
+        wpm_z = getattr(anomaly, "z_scores", {}).get("wpm", 0.0) if hasattr(anomaly, "z_scores") else 0.0
+        wpm_cur = round(float(getattr(metrics, "wpm", 0.0)), 3) if metrics else 0.0
+        dwell_cur = round(float(getattr(metrics, "avg_dwell_ms", 0.0)), 3) if metrics else 0.0
+        cons_cur = round(float(getattr(metrics, "consistency_stddev", 0.0)), 3) if metrics else 0.0
+
+        self._db._execute(
+            """
+            INSERT INTO behavioral_alerts
+                (alerted_at, similarity_score, wpm_current, wpm_zscore,
+                 dwell_current, consistency_stddev, alert_type, explanations_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                time.time(),
+                round(float(getattr(anomaly, "similarity_score", 0.0)), 2),
+                wpm_cur,
+                round(wpm_z, 3),
+                dwell_cur,
+                cons_cur,
+                str(alert_type),
+                json.dumps(getattr(anomaly, "explanations", [])),
+            ),
+        )
+
+    def update_alert_feedback(self, alert_id: int, feedback: str) -> None:
+        """
+        Record user feedback on an alert row.
+        feedback: 'this_was_me' | 'confirmed_threat' | 'dismissed'
+        """
+        self._db._execute(
+            "UPDATE behavioral_alerts SET user_feedback = ? WHERE id = ?",
+            (feedback, alert_id),
+        )
+
+    def delete_all_samples(self) -> None:
+        """Delete all typing_behavior and mouse_behavior rows."""
+        self._db._execute("DELETE FROM typing_behavior", ())
+        try:
+            self._db._execute("DELETE FROM mouse_behavior", ())
+        except Exception:
+            pass
+        logger.info("All typing_behavior and mouse_behavior rows deleted.")
+
+    # ------------------------------------------------------------------
+    # Read
+    # ------------------------------------------------------------------
+
+    def query_recent_samples(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Return recent typing samples ordered newest-first."""
+        rows = self._db._fetchall(
+            """
+            SELECT id, recorded_at, wpm, avg_dwell_ms, avg_flight_ms,
+                   consistency_stddev, burst_count, keystroke_count, is_training_data
+            FROM typing_behavior
+            ORDER BY recorded_at DESC
+            LIMIT ?
+            """,
+            [limit],
+        )
+        keys = [
+            "id", "recorded_at", "wpm", "avg_dwell_ms", "avg_flight_ms",
+            "consistency_stddev", "burst_count", "keystroke_count", "is_training_data",
+        ]
+        return [dict(zip(keys, r)) for r in rows]
+
+    def query_recent_mouse_samples(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Return recent mouse samples ordered newest-first."""
+        rows = self._db._fetchall(
+            """
+            SELECT id, recorded_at, avg_speed_pxsec, curvature_index,
+                   micro_movements_per_sec, jitter_stddev_px,
+                   avg_click_duration_ms, avg_double_click_ms,
+                   click_to_move_latency_ms, pause_frequency_per_min,
+                   acceleration_avg, scroll_lines_per_scroll,
+                   overshoot_frequency, left_right_click_ratio, is_training_data
+            FROM mouse_behavior
+            ORDER BY recorded_at DESC
+            LIMIT ?
+            """,
+            [limit],
+        )
+        keys = [
+            "id", "recorded_at", "avg_speed_pxsec", "curvature_index",
+            "micro_movements_per_sec", "jitter_stddev_px",
+            "avg_click_duration_ms", "avg_double_click_ms",
+            "click_to_move_latency_ms", "pause_frequency_per_min",
+            "acceleration_avg", "scroll_lines_per_scroll",
+            "overshoot_frequency", "left_right_click_ratio", "is_training_data",
+        ]
+        return [dict(zip(keys, r)) for r in rows]
+
+    def get_training_sample_count(self) -> int:
+        """Return the number of typing training-tagged rows."""
+        rows = self._db._fetchall(
+            "SELECT COUNT(*) FROM typing_behavior WHERE is_training_data = 1", []
+        )
+        return int(rows[0][0]) if rows else 0
+
+    def get_mouse_training_sample_count(self) -> int:
+        """Return the number of mouse training-tagged rows."""
+        rows = self._db._fetchall(
+            "SELECT COUNT(*) FROM mouse_behavior WHERE is_training_data = 1", []
+        )
+        return int(rows[0][0]) if rows else 0
+
+    def query_recent_alerts(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Return recent behavioral alerts ordered newest-first."""
+        rows = self._db._fetchall(
+            """
+            SELECT id, alerted_at, similarity_score, wpm_current,
+                   dwell_current, consistency_stddev, alert_type,
+                   explanations_json, user_feedback
+            FROM behavioral_alerts
+            ORDER BY alerted_at DESC
+            LIMIT ?
+            """,
+            [limit],
+        )
+        keys = [
+            "id", "alerted_at", "similarity_score", "wpm_current",
+            "dwell_current", "consistency_stddev", "alert_type",
+            "explanations_json", "user_feedback",
+        ]
+        result = []
+        for r in rows:
+            d = dict(zip(keys, r))
+            try:
+                d["explanations"] = json.loads(d.pop("explanations_json", "[]"))
+            except Exception:
+                d["explanations"] = []
+            result.append(d)
+        return result
+
+
+# Alias for multi-modal behavioral storage
+BehavioralStore = TypingBehaviorStore
