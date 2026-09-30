@@ -144,6 +144,11 @@ def _build_parser() -> argparse.ArgumentParser:
 # Detection pipeline callback
 # ---------------------------------------------------------------------------
 
+# Minimum interval (seconds) between duplicate DB insertions for the same PID.
+# Prevents the detections table from ballooning when a threat persists across
+# successive scan cycles.
+_DB_LOG_COOLDOWN: float = 60.0
+
 class DetectionPipeline:
     """
     Wires Monitor → FeatureExtractor → Classifier → AlertManager → DBLogger.
@@ -172,6 +177,9 @@ class DetectionPipeline:
 
         # Keep a {pid: detection_id} map so actions can link to their detection
         self._pid_to_detection_id: Dict[int, int] = {}
+        # Per-PID last-logged timestamp for DB deduplication
+        self._pid_last_logged: Dict[int, float] = {}
+        self._background_threats = []
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
@@ -189,6 +197,18 @@ class DetectionPipeline:
         # Stage 3: Classification
         results = self._classifier.batch_classify(feature_vectors)
 
+        snapshots_by_pid = {snapshot.pid: snapshot for snapshot in snapshots}
+        background_threats = [
+            result
+            for result in results
+            if result.is_threat
+            and result.pid in snapshots_by_pid
+            and not snapshots_by_pid[result.pid].is_foreground
+            and not self._alert_mgr.is_whitelisted(result)
+        ]
+        with self._lock:
+            self._background_threats = background_threats
+
         # Split threats from clean
         threats = [r for r in results if r.is_threat]
         self._threat_count += len(threats)
@@ -197,12 +217,22 @@ class DetectionPipeline:
         new_records = self._alert_mgr.process_results(threats)
 
         # Stage 4b: Log threats to DB
+        # Skip whitelisted processes and apply a per-PID cooldown so that the
+        # same threat is not re-inserted into the detections table every scan.
         fv_map = {fv.pid: fv for fv in feature_vectors}
+        now = time.time()
         for result in threats:
+            if self._alert_mgr.is_whitelisted(result):
+                continue
+            with self._lock:
+                last_logged = self._pid_last_logged.get(result.pid, 0.0)
+            if now - last_logged < _DB_LOG_COOLDOWN:
+                continue
             fv = fv_map.get(result.pid)
             det_id = self._db.log_detection(result, fv)
             with self._lock:
                 self._pid_to_detection_id[result.pid] = det_id
+                self._pid_last_logged[result.pid] = now
 
         # Stage 4c: Log raw snapshots (if enabled)
         self._db.log_snapshots_batch(snapshots)
@@ -244,6 +274,19 @@ class DetectionPipeline:
         with self._lock:
             det_id = self._pid_to_detection_id.get(action_result.pid)
         self._db.log_action(action_result, detection_id=det_id)
+
+    def get_background_threat_context(self) -> Optional[str]:
+        """Describe the highest-risk active process outside the foreground."""
+        with self._lock:
+            if not self._background_threats:
+                return None
+            result = max(self._background_threats, key=lambda item: item.score)
+
+        return (
+            f"Background process {result.name} (PID {result.pid}) is classified "
+            f"{result.risk_level.display_name} with a {result.score:.0%} risk score. "
+            "This coincides with the behavioral mismatch but does not prove attribution."
+        )
 
     # ------------------------------------------------------------------
     # Status string for the UI stats tab
@@ -390,9 +433,12 @@ def main() -> int:
                 db_store=typing_store,
                 baseline_path=PROJECT_ROOT / "data" / "typing_baseline.json",
             )
+            behavioral_engine.set_alert_context_provider(
+                pipeline.get_background_threat_context
+            )
             started = behavioral_engine.start()
             if started:
-                logger.info("BehavioralAnalysisEngine started (pynput listener active).")
+                logger.info("BehavioralAnalysisEngine started (zero-hook keyboard poller active).")
             else:
                 logger.warning(
                     "BehavioralAnalysisEngine: pynput listener could not start. "

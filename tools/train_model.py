@@ -107,6 +107,8 @@ _DIST: Dict[str, List[Tuple[float, float, float, float]]] = {
         (3600,  7200, 30, 86400),   # age_seconds
         (0.02,  0.12, 0.0, 1.0),   # hook_no_window
         (0.01,  0.08, 0.0, 1.0),   # hook_with_network
+        (0.00,  0.02, 0.0, 1.0),   # has_kernel_hooks        (virtually never in benign)
+        (0.01,  0.08, 0.0, 1.0),   # uses_raw_input_api      (rare benign: game input)
     ],
     "suspicious": [
         (0.75,  0.35, 0.0, 1.0),   # hook_api_present
@@ -133,6 +135,8 @@ _DIST: Dict[str, List[Tuple[float, float, float, float]]] = {
         (900,   1800, 30, 43200),   # age_seconds
         (0.40,  0.40, 0.0, 1.0),   # hook_no_window
         (0.25,  0.35, 0.0, 1.0),   # hook_with_network
+        (0.08,  0.20, 0.0, 1.0),   # has_kernel_hooks        (ambiguous driver present)
+        (0.12,  0.25, 0.0, 1.0),   # uses_raw_input_api      (accessibility / macro tools)
     ],
     "malicious": [
         (0.95,  0.15, 0.0, 1.0),   # hook_api_present
@@ -159,6 +163,8 @@ _DIST: Dict[str, List[Tuple[float, float, float, float]]] = {
         (300,   600,  10, 10800),   # age_seconds           (fresh processes)
         (0.88,  0.25, 0.0, 1.0),   # hook_no_window
         (0.80,  0.30, 0.0, 1.0),   # hook_with_network
+        (0.55,  0.40, 0.0, 1.0),   # has_kernel_hooks        (rootkit / kernel keylogger)
+        (0.70,  0.35, 0.0, 1.0),   # uses_raw_input_api      (raw input keylogger pattern)
     ],
 }
 
@@ -203,7 +209,7 @@ def generate_dataset(
 
             # Binary features: round to 0/1
             binary_indices = [
-                0, 1, 3, 13, 14, 15, 16, 17, 19, 20, 22, 23
+                0, 1, 3, 13, 14, 15, 16, 17, 19, 20, 22, 23, 24, 25
             ]
             for idx in binary_indices:
                 features[idx] = float(round(min(max(features[idx], 0.0), 1.0)))

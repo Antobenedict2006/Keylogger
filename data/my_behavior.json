@@ -1,0 +1,41 @@
+{
+  "_comment": "Confirmed multi-modal behavioral snapshots (saved via 'This Was Me').",
+  "_privacy": "Only timing & motion dynamics stored. No screen content or key characters.",
+  "last_confirmed": "2026-09-30T21:04:41.923626",
+  "total_confirmations": 2,
+  "latest_session": {
+    "timestamp": "2026-09-30T21:04:41.923626",
+    "keystroke_count": 98,
+    "wpm": 19.6,
+    "dwell_ms": 227.87,
+    "flight_ms": 595.18,
+    "consistency_stddev": 511.23,
+    "mouse_speed_pxsec": 141.55,
+    "mouse_curvature": 1.2,
+    "mouse_clicks": 2
+  },
+  "history": [
+    {
+      "timestamp": "2026-09-30T20:56:37.576905",
+      "keystroke_count": 6,
+      "wpm": 0.0,
+      "dwell_ms": 0.0,
+      "flight_ms": 0.0,
+      "consistency_stddev": 0.0,
+      "mouse_speed_pxsec": 406.69,
+      "mouse_curvature": 1.46,
+      "mouse_clicks": 6
+    },
+    {
+      "timestamp": "2026-09-30T21:04:41.923626",
+      "keystroke_count": 98,
+      "wpm": 19.6,
+      "dwell_ms": 227.87,
+      "flight_ms": 595.18,
+      "consistency_stddev": 511.23,
+      "mouse_speed_pxsec": 141.55,
+      "mouse_curvature": 1.2,
+      "mouse_clicks": 2
+    }
+  ]
+}

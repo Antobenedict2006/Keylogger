@@ -30,7 +30,9 @@
     "running_from_appdata",
     "age_seconds",
     "hook_no_window",
-    "hook_with_network"
+    "hook_with_network",
+    "has_kernel_hooks",
+    "uses_raw_input_api"
   ],
   "trained_at": "2026-09-19T13:06:29Z"
 }

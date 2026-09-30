@@ -91,6 +91,7 @@ class ProcessSnapshot:
     # Visibility
     has_visible_window: bool = False
     window_count: int = 0
+    is_foreground: bool = False
 
     # Resource signals
     cpu_percent: float = 0.0
@@ -166,6 +167,19 @@ def _get_window_pids() -> Dict[int, int]:
 
     user32.EnumWindows(EnumWindowsProc(_callback), 0)
     return pid_window_count
+
+
+def _get_foreground_pid() -> Optional[int]:
+    """Return the PID that owns the current foreground window, if any."""
+    user32 = ctypes.windll.user32
+    user32.GetForegroundWindow.restype = wt.HWND
+    hwnd = user32.GetForegroundWindow()
+    if not hwnd:
+        return None
+
+    pid = wt.DWORD(0)
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return pid.value or None
 
 
 def _get_loaded_modules(pid: int) -> List[str]:
@@ -792,6 +806,17 @@ class ProcessMonitor:
     # ------------------------------------------------------------------
 
     def _run_loop(self) -> None:
+        if os.name == "nt":
+            try:
+                kernel32 = ctypes.windll.kernel32
+                kernel32.GetCurrentThread.restype = wt.HANDLE
+                kernel32.SetThreadPriority.argtypes = [wt.HANDLE, ctypes.c_int]
+                kernel32.SetThreadPriority.restype = wt.BOOL
+                if not kernel32.SetThreadPriority(kernel32.GetCurrentThread(), -1):
+                    logger.debug("Could not lower process monitor thread priority.")
+            except Exception as exc:
+                logger.debug("Could not configure process monitor priority: %s", exc)
+
         while not self._stop_event.is_set():
             try:
                 snapshots = self._scan_all_processes()
@@ -804,6 +829,7 @@ class ProcessMonitor:
     def _scan_all_processes(self) -> List[ProcessSnapshot]:
         """Collect a ProcessSnapshot for every accessible running process."""
         window_pids = _get_window_pids()
+        foreground_pid = _get_foreground_pid()
         seen_pids: Set[int] = set()
         snapshots: List[ProcessSnapshot] = []
 
@@ -824,7 +850,9 @@ class ProcessMonitor:
                 pid: int = info["pid"]
                 seen_pids.add(pid)
 
-                snap = self._build_snapshot(proc, info, window_pids, net_io_map)
+                snap = self._build_snapshot(
+                    proc, info, window_pids, net_io_map, foreground_pid
+                )
                 snapshots.append(snap)
 
             except (psutil.NoSuchProcess, psutil.ZombieProcess):
@@ -842,6 +870,7 @@ class ProcessMonitor:
                         username=None,
                         create_time=0.0,
                         is_system_process=True,
+                        is_foreground=pid == foreground_pid,
                     )
                     snapshots.append(snap)
                 except Exception:
@@ -869,6 +898,7 @@ class ProcessMonitor:
         info: dict,
         window_pids: Dict[int, int],
         net_io_map: Dict[int, int],
+        foreground_pid: Optional[int],
     ) -> ProcessSnapshot:
         pid: int = info["pid"]
 
@@ -885,6 +915,7 @@ class ProcessMonitor:
         # --- Window visibility ---
         snap.window_count = window_pids.get(pid, 0)
         snap.has_visible_window = snap.window_count > 0
+        snap.is_foreground = pid == foreground_pid
 
         # --- System process heuristic ---
         snap.is_system_process = _is_system_process(proc)

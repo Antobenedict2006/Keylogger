@@ -162,6 +162,12 @@ def _heuristic_score(features: np.ndarray) -> float:
     if features[_IDX["cmdline_empty"]] > 0 and features[_IDX["hook_api_present"]] > 0:
         score += 0.07
 
+    # Group H – Extended detection signals
+    if features[_IDX["has_kernel_hooks"]] > 0:
+        score += 0.35          # kernel-mode hook is a very strong indicator
+    if features[_IDX["uses_raw_input_api"]] > 0:
+        score += 0.20          # raw input on hidden window = classic pattern
+
     # Mitigating factors (reduce score for benign traits)
     if features[_IDX["is_system_process"]] > 0:
         score -= 0.30
