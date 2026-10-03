@@ -331,6 +331,12 @@ def main() -> int:
     # Required for Windows frozen executables using multiprocessing
     multiprocessing.freeze_support()
 
+    # Show loading screen FIRST
+    from src.ui.loading_screen import LoadingScreen
+    loading = LoadingScreen()
+    loading.show()
+    loading.update_progress(5, "Initializing environment...")
+
     # Single-instance mutex — prevent multiple detector instances from running
     # simultaneously (causes DB lock contention and duplicate alerts).
     import ctypes
@@ -340,6 +346,7 @@ def main() -> int:
     ERROR_ALREADY_EXISTS = 183
 
     if last_error == ERROR_ALREADY_EXISTS:
+        loading.close()
         ctypes.windll.user32.MessageBoxW(
             0,
             "Keylogger Detector is already running.\n\n"
@@ -349,9 +356,11 @@ def main() -> int:
         )
         return 1
 
+    loading.update_progress(10, "Parsing arguments...")
     parser = _build_parser()
     args   = parser.parse_args()
 
+    loading.update_progress(15, "Setting up logging...")
     _setup_logging(args.log_level, args.log_file)
     _install_signal_handlers()
 
@@ -365,6 +374,7 @@ def main() -> int:
     # ------------------------------------------------------------------
     # 1. Database
     # ------------------------------------------------------------------
+    loading.update_progress(25, "Initializing database...")
     db_logger = DBLogger(
         db_path=args.db,
         log_all_snapshots=args.log_snapshots,
@@ -373,6 +383,7 @@ def main() -> int:
     # ------------------------------------------------------------------
     # 2. Classifier
     # ------------------------------------------------------------------
+    loading.update_progress(40, "Loading AI classifier...")
     classifier = KeyloggerClassifier(model_path=args.model)
     loaded = classifier.load_model()
     if not loaded:
@@ -386,6 +397,7 @@ def main() -> int:
     # ------------------------------------------------------------------
     # 3. Alert manager
     # ------------------------------------------------------------------
+    loading.update_progress(55, "Setting up alert system...")
     # Only notify for MALICIOUS threats (not SUSPICIOUS)
     min_risk = RiskLevel.MALICIOUS
 
@@ -398,6 +410,7 @@ def main() -> int:
     # ------------------------------------------------------------------
     # 4. Feature extractor & pipeline
     # ------------------------------------------------------------------
+    loading.update_progress(65, "Building detection pipeline...")
     extractor = FeatureExtractor()
     pipeline  = DetectionPipeline(
         extractor=extractor,
@@ -412,6 +425,7 @@ def main() -> int:
     # ------------------------------------------------------------------
     # 5. Process monitor
     # ------------------------------------------------------------------
+    loading.update_progress(75, "Starting process monitor...")
     monitor = ProcessMonitor(
         callback=pipeline.on_snapshots,
         scan_interval=args.scan_interval,
@@ -422,6 +436,7 @@ def main() -> int:
     # ------------------------------------------------------------------
     # 5b. Behavioral Analysis Engine (Phase 1)
     # ------------------------------------------------------------------
+    loading.update_progress(85, "Loading behavioral analysis...")
     behavioral_engine = None
     if _BEHAVIORAL_AVAILABLE:
         try:
@@ -448,14 +463,21 @@ def main() -> int:
     else:
         logger.info("Behavioral analysis module not available (pynput not installed).")
 
+    loading.update_progress(95, "Finalizing startup...")
+
     # ------------------------------------------------------------------
     # 6. UI  (or headless)
     # ------------------------------------------------------------------
     exit_code = 0
     try:
         if args.no_gui:
+            loading.close()
             _run_headless(monitor)
         else:
+            loading.update_progress(100, "Ready!")
+            time.sleep(0.3)  # Brief pause to show 100%
+            loading.close()
+            
             # Dashboard.run() blocks on the Tkinter mainloop
             from src.ui.dashboard import Dashboard
 
@@ -487,6 +509,7 @@ def main() -> int:
             dashboard.run()   # blocks until window closed / quit
 
     except Exception as exc:
+        loading.close()
         logger.exception("Fatal error in main loop: %s", exc)
         exit_code = 1
 
