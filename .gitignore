@@ -13,7 +13,47 @@ quarantine/
 models/*.joblib
 data/whitelist.json
 
-# SQLite
+# Behavior CSV files (personal data - DO NOT COMMIT)
+data/*.csv
+data/my_behavior*.csv
+data/my_behavior*.json
+data/example_behavior.csv
+
+# Behavioral analysis data (personal biometrics)
+data/*_behavior.json
+data/*_baseline.json
+data/mouse_*.json
+data/keyboard_*.json
+data/behavioral_*.json
+data/typing_*.json
+data/comparison_*.json
+
+# SQLite databases
 *.db
 *.db-wal
 *.db-shm
+
+# Build artifacts
+dist/
+build/
+*.spec.bak
+*.exe
+
+# PyInstaller
+*.manifest
+*.spec.bak
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log

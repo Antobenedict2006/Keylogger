@@ -48,17 +48,13 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
+from .paths import DEFAULT_QUARANTINE_DIR, DEFAULT_WHITELIST_PATH
+
 # Seconds before the same PID can trigger another desktop notification
 ALERT_COOLDOWN: float = 60.0
 
 # Maximum alerts kept in the in-memory recent-alerts buffer for the UI
 MAX_RECENT_ALERTS: int = 200
-
-# Quarantine folder (relative to project root)
-DEFAULT_QUARANTINE_DIR = Path(__file__).parent.parent / "quarantine"
-
-# Whitelist persistence file
-DEFAULT_WHITELIST_PATH = Path(__file__).parent.parent / "data" / "whitelist.json"
 
 
 # ---------------------------------------------------------------------------

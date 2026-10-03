@@ -1,90 +1,151 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec file for AI Keylogger Detection System
-========================================================
+keylogger_detector.spec
+=======================
+PyInstaller build specification for the AI-Based Keylogger Detection System.
 
-This spec file creates a single-file Windows executable with all dependencies.
+Usage
+-----
+  pyinstaller keylogger_detector.spec
 
-To build:
-    pyinstaller keylogger_detector.spec
+Output
+------
+  dist/KeyloggerDetector.exe   — standalone Windows executable
 
-Output:
-    dist/KeyloggerDetector.exe (single file, ~50-80 MB)
+Build modes
+-----------
+  This spec produces a WINDOWED application (no console) with a system tray icon.
+  Users can still see logs via the dashboard or the log file.
+
+  To debug startup issues, temporarily change console=False to console=True
+  in the EXE() call below.
 """
 
-import sys
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+import sys
+from pathlib import Path
 
-# Application metadata
-APP_NAME = 'KeyloggerDetector'
-APP_VERSION = '1.0.0'
-APP_AUTHOR = 'Your Name'
+block_cipher = None
 
-# Collect all sklearn submodules (required for ML model)
-sklearn_modules = collect_submodules('sklearn')
-
-# Additional hidden imports
-hidden_imports = [
-    'sklearn.ensemble',
-    'sklearn.tree',
-    'sklearn.neighbors',
-    'sklearn.neural_network',
-    'sklearn.utils._typedefs',
-    'sklearn.utils._heap',
-    'sklearn.utils._sorting',
-    'sklearn.utils._vector_sentinel',
-    'tkinter',
-    'tkinter.ttk',
-    'tkinter.messagebox',
-    'psutil',
-    'sqlite3',
-    'queue',
-    'threading',
-    'json',
-    'pathlib',
-    'logging',
-    'time',
-    'pystray',
-    'PIL',
-    'PIL.Image',
-    'PIL.ImageDraw',
-    'PIL.ImageTk',
-    'joblib',
-    'numpy',
-    'pandas',
-] + sklearn_modules
-
-# Data files to include (ML model, database, etc.)
-datas = [
-    ('models/keylogger_detector.joblib', 'models'),  # ML model
-    # Add any other data files here
-]
-
-# Binary exclusions (reduce file size)
-excluded_binaries = []
+# ---------------------------------------------------------------------------
+# Source analysis
+# ---------------------------------------------------------------------------
 
 a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=datas,
-    hiddenimports=hidden_imports,
+    datas=[
+        # Note: These files are optional. If they don't exist, they'll be created
+        # at runtime in %LOCALAPPDATA%\KeyloggerDetector\
+        # Only include them if they exist during build:
+        # ('models/*.joblib', 'models'),
+        # ('models/*.json', 'models'),
+        # ('data/typing_baseline.json', 'data'),
+        # ('data/mouse_baseline.json', 'data'),
+        # ('data/whitelist.json', 'data'),
+    ],
+    hiddenimports=[
+        # Core ML dependencies
+        'sklearn.ensemble',
+        'sklearn.tree',
+        'sklearn.preprocessing',
+        'sklearn.pipeline',
+        'joblib',
+        'numpy',
+        
+        # Process monitoring
+        'psutil',
+        
+        # UI dependencies
+        'tkinter',
+        'tkinter.ttk',
+        'tkinter.font',
+        'PIL',
+        'PIL.Image',
+        'PIL.ImageTk',
+        'pystray',
+        
+        # Notifications
+        'plyer',
+        'plyer.platforms.win.notification',
+        
+        # Behavioral analysis (optional)
+        'pynput',
+        'pynput.keyboard',
+        'pynput.mouse',
+        
+        # Database
+        'sqlite3',
+        
+        # Multiprocessing
+        'multiprocessing',
+        'multiprocessing.spawn',
+        
+        # Project modules
+        'src.monitor',
+        'src.feature_extractor',
+        'src.classifier',
+        'src.alert_manager',
+        'src.db_logger',
+        'src.behavioral_analyzer',
+        'src.paths',
+        'src.ui.dashboard',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        'matplotlib',  # Not used
-        'scipy',       # Not used
-        'IPython',     # Not used
-        'jupyter',     # Not used
+        # Exclude heavy unused packages to reduce .exe size and build time
+        'matplotlib',
+        'scipy',
+        'pandas',
+        'IPython',
+        'jupyter',
+        'notebook',
+        'pytest',
+        # Web frameworks (removed)
+        'flask',
+        'flask_cors',
+        'jinja2',
+        'werkzeug',
+        # Don't exclude setuptools/distutils - causes issues
+        # Exclude deep learning frameworks (not used)
+        'torch',
+        'torchvision',
+        'tensorflow',
+        'keras',
+        # Exclude symbolic math (not used)
+        'sympy',
+        'mpmath',
+        # Exclude testing frameworks
+        'unittest',
+        'nose',
+        'py',
+        'pygments',
+        # Exclude documentation tools
+        'sphinx',
+        'docutils',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
-    cipher=None,
+    cipher=block_cipher,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=None)
+# ---------------------------------------------------------------------------
+# PYZ (compressed archive of pure Python modules)
+# ---------------------------------------------------------------------------
+
+pyz = PYZ(
+    a.pure,
+    a.zipped_data,
+    cipher=block_cipher,
+)
+
+# ---------------------------------------------------------------------------
+# EXE (the final executable)
+# ---------------------------------------------------------------------------
 
 exe = EXE(
     pyz,
@@ -93,19 +154,35 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name=APP_NAME,
+    name='KeyloggerDetector',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,  # Compress with UPX (reduces size by ~30%)
+    upx=True,                    # Compress with UPX if available (reduces size ~40%)
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # No console window (GUI mode)
+    console=False,               # WINDOWED mode — no console window
     disable_windowed_traceback=False,
-    argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='icon.ico',  # Application icon
-    version_file=None,
+    icon='icon.ico',             # Application icon (create this if it doesn't exist)
+    version_file=None,           # Optional: create a version_info.txt for metadata
 )
+
+# ---------------------------------------------------------------------------
+# Optional: COLLECT (for --onedir mode, disabled here)
+# ---------------------------------------------------------------------------
+# We're using --onefile mode (everything in a single .exe) so no COLLECT step.
+# If you want --onedir (exe + _internal folder), uncomment below:
+#
+# coll = COLLECT(
+#     exe,
+#     a.binaries,
+#     a.zipfiles,
+#     a.datas,
+#     strip=False,
+#     upx=True,
+#     upx_exclude=[],
+#     name='KeyloggerDetector',
+# )

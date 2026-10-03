@@ -8,6 +8,5 @@ plyer==2.1.0
 pystray==0.19.5
 Pillow==10.3.0
 pyinstaller==6.3.0
-Flask>=3.0,<4.0        # Local HTTP bridge for the web dashboard
-fpdf2>=2.7.0          # PDF export (Feature 6) – pip install fpdf2
-pynput==1.7.6         # Behavioral typing analysis (Phase 1) – keyboard timing monitor
+fpdf2>=2.7.0          # PDF export (Feature 6)
+pynput==1.7.6         # Behavioral typing analysis (Phase 1)

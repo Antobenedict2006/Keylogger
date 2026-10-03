@@ -56,14 +56,12 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL_PATH = Path(__file__).parent.parent / "models" / "keylogger_detector.joblib"
+from .paths import DEFAULT_MODEL_PATH, DEFAULT_MODEL_PATH_PERSONALIZED
 
 # Personalized model path — written by the Train-Model tab after the user
 # records their own behavior and trains a personalized classifier.
 # If this file exists it takes priority over the generic model above.
-PERSONALIZED_MODEL_PATH = (
-    Path(__file__).parent.parent / "models" / "keylogger_detector_personalized.joblib"
-)
+PERSONALIZED_MODEL_PATH = DEFAULT_MODEL_PATH_PERSONALIZED
 
 SUSPICIOUS_THRESHOLD: float = 0.35
 MALICIOUS_THRESHOLD: float  = 0.70

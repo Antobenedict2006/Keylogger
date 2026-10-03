@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import multiprocessing
 import os
 import signal
 import sys
@@ -43,20 +44,14 @@ from typing import Dict, List, Optional
 # ---------------------------------------------------------------------------
 # Ensure project root is on sys.path when run directly
 # ---------------------------------------------------------------------------
-PROJECT_ROOT = Path(__file__).parent.resolve()
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+from src.paths import get_user_data_root, DEFAULT_MODEL_PATH, DEFAULT_DB_PATH, DEFAULT_LOG_FILE, DEFAULT_TYPING_BASELINE_PATH
+PROJECT_ROOT = get_user_data_root()
 
 from src.monitor          import ProcessMonitor, ProcessSnapshot
 from src.feature_extractor import FeatureExtractor, FeatureVector
 from src.classifier        import KeyloggerClassifier, RiskLevel
 from src.alert_manager     import AlertManager, ActionResult, ResponseAction
 from src.db_logger         import DBLogger
-from src.live_api          import start as _start_live_api, stop as _stop_live_api, \
-                                   update_scan_results as _update_live_api, \
-                                   build_result_dict as _build_live_result, \
-                                   set_components as _set_live_components, \
-                                   get_notifications_enabled as _get_notifications_enabled
 
 # Behavioral analysis (Phase 1) — optional, degrades gracefully if pynput absent
 try:
@@ -102,18 +97,22 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run in headless mode (no Tkinter window or tray icon).",
     )
     p.add_argument(
+        "--minimized", action="store_true",
+        help="Start minimized to system tray (GUI mode only).",
+    )
+    p.add_argument(
         "--scan-interval", type=float, default=5.0, metavar="SECONDS",
         help="Seconds between process scans (default: 5).",
     )
     p.add_argument(
         "--model", type=Path,
-        default=PROJECT_ROOT / "models" / "keylogger_detector.joblib",
+        default=DEFAULT_MODEL_PATH,
         metavar="PATH",
         help="Path to trained model file (.joblib).",
     )
     p.add_argument(
         "--db", type=Path,
-        default=PROJECT_ROOT / "logs" / "keylogger_events.db",
+        default=DEFAULT_DB_PATH,
         metavar="PATH",
         help="Path to SQLite event database.",
     )
@@ -124,14 +123,9 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--log-file", type=Path,
-        default=PROJECT_ROOT / "logs" / "detector.log",
+        default=DEFAULT_LOG_FILE,
         metavar="PATH",
         help="Optional file to write logs to.",
-    )
-    p.add_argument(
-        "--alert-threshold", choices=["suspicious", "malicious"],
-        default="suspicious",
-        help="Minimum risk level that triggers a desktop notification.",
     )
     p.add_argument(
         "--log-snapshots", action="store_true",
@@ -237,21 +231,6 @@ class DetectionPipeline:
         # Stage 4c: Log raw snapshots (if enabled)
         self._db.log_snapshots_batch(snapshots)
 
-        # Stage 4d: Push ALL results to the live web dashboard
-        # Build the web-friendly dict for every classified process and
-        # stream it to the Flask bridge so the Next.js UI can display it.
-        fv_map_all = {fv.pid: fv for fv in feature_vectors}
-        try:
-            web_results = [
-                _build_live_result(cr, fv_map_all[cr.pid])
-                for cr in results
-                if cr.pid in fv_map_all
-            ]
-            if web_results:
-                _update_live_api(web_results)
-        except Exception as _live_exc:
-            logger.debug("live_api update skipped: %s", _live_exc)
-
         self._last_scan_time = time.time() - scan_start
 
         if self._scan_count % 12 == 0:   # log a heartbeat every ~1 min
@@ -349,6 +328,27 @@ def _run_headless(monitor: ProcessMonitor) -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> int:
+    # Required for Windows frozen executables using multiprocessing
+    multiprocessing.freeze_support()
+
+    # Single-instance mutex — prevent multiple detector instances from running
+    # simultaneously (causes DB lock contention and duplicate alerts).
+    import ctypes
+    mutex_name = "Global\\KeyloggerDetector_SingleInstance_Mutex"
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
+    last_error = ctypes.windll.kernel32.GetLastError()
+    ERROR_ALREADY_EXISTS = 183
+
+    if last_error == ERROR_ALREADY_EXISTS:
+        ctypes.windll.user32.MessageBoxW(
+            0,
+            "Keylogger Detector is already running.\n\n"
+            "Only one instance is allowed at a time to prevent database conflicts.",
+            "Already Running",
+            0x30,  # MB_ICONWARNING
+        )
+        return 1
+
     parser = _build_parser()
     args   = parser.parse_args()
 
@@ -386,10 +386,8 @@ def main() -> int:
     # ------------------------------------------------------------------
     # 3. Alert manager
     # ------------------------------------------------------------------
-    min_risk = (
-        RiskLevel.MALICIOUS if args.alert_threshold == "malicious"
-        else RiskLevel.SUSPICIOUS
-    )
+    # Only notify for MALICIOUS threats (not SUSPICIOUS)
+    min_risk = RiskLevel.MALICIOUS
 
     # We wire the action callback after building the pipeline
     alert_mgr = AlertManager(
@@ -431,7 +429,7 @@ def main() -> int:
             typing_store.ensure_schema()
             behavioral_engine = BehavioralAnalysisEngine(
                 db_store=typing_store,
-                baseline_path=PROJECT_ROOT / "data" / "typing_baseline.json",
+                baseline_path=DEFAULT_TYPING_BASELINE_PATH,
             )
             behavioral_engine.set_alert_context_provider(
                 pipeline.get_background_threat_context
@@ -449,26 +447,6 @@ def main() -> int:
             behavioral_engine = None
     else:
         logger.info("Behavioral analysis module not available (pynput not installed).")
-
-    # Wire the live web API to the same component instances used by the desktop UI.
-    _set_live_components(
-        alert_manager=alert_mgr,
-        db_logger=db_logger,
-        classifier=classifier,
-        behavioral_engine=behavioral_engine,
-    )
-    _start_live_api()
-    logger.info("Live API bridge running on http://127.0.0.1:8765")
-
-    # Keep web and desktop notification preferences connected to the same state.
-    import src.alert_manager as alert_manager_module
-    original_send_notification = alert_manager_module._send_desktop_notification
-
-    def _send_notification_if_enabled(result) -> None:
-        if _get_notifications_enabled():
-            original_send_notification(result)
-
-    alert_manager_module._send_desktop_notification = _send_notification_if_enabled
 
     # ------------------------------------------------------------------
     # 6. UI  (or headless)
@@ -531,10 +509,6 @@ def main() -> int:
         pass
     try:
         db_logger.close()
-    except Exception:
-        pass
-    try:
-        _stop_live_api()
     except Exception:
         pass
 

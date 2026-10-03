@@ -59,7 +59,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_DB_PATH = Path(__file__).parent.parent / "logs" / "keylogger_events.db"
+from .paths import DEFAULT_DB_PATH
 
 # Days of raw process snapshots to retain (older rows are pruned on startup)
 SNAPSHOT_RETENTION_DAYS: int = 7
