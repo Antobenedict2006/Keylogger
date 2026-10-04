@@ -1,244 +1,240 @@
 """
-loading_screen.py
-=================
-Animated loading screen shown during application initialization.
-
-Features:
-  - Concentric rotating rings (based on the stitch design)
-  - Progress counter and status messages
-  - Non-blocking - runs in a separate thread
-  - Automatically closes when initialization completes
+Loading screen with animated concentric rotating rings
+Based on the Stitch Concentric Motion design
 """
 
-import math
-import threading
-import time
 import tkinter as tk
 from tkinter import ttk
+import math
 
 
 class LoadingScreen:
     """
-    Animated loading screen with rotating concentric rings.
-    
-    Usage::
-        loading = LoadingScreen()
-        loading.show()
-        loading.update_progress(50, "Loading components...")
-        # ... do initialization work ...
-        loading.close()
+    Animated loading screen with rotating concentric rings
     """
     
-    def __init__(self):
-        self.root = None
-        self.canvas = None
-        self.progress_label = None
-        self.status_label = None
-        self.animation_running = False
-        self.current_progress = 0
-        self.current_status = "Initializing..."
+    def __init__(self, parent=None):
+        """Initialize the loading screen"""
+        if parent:
+            self.root = tk.Toplevel(parent)
+        else:
+            self.root = tk.Tk()
         
-        # Ring animation angles
-        self.outer_angle = 0
-        self.middle_angle = 0
-        self.inner_angle = 0
-        
-        # Colors (from the stitch design)
-        self.bg_color = "#131317"
-        self.cyan_color = "#00f5ff"
-        self.magenta_color = "#ff007a"
-        self.blue_color = "#3b82f5"
-        self.text_color = "#e4e1e8"
-        self.text_dim = "#94a3b8"
-    
-    def show(self):
-        """Create and show the loading window in a separate thread."""
-        thread = threading.Thread(target=self._create_window, daemon=True)
-        thread.start()
-        time.sleep(0.1)  # Give window time to appear
-    
-    def _create_window(self):
-        """Create the loading window (runs in separate thread)."""
-        self.root = tk.Tk()
         self.root.title("Loading...")
-        self.root.configure(bg=self.bg_color)
+        self.root.overrideredirect(True)  # Remove window decorations
         
-        # Window setup
-        window_width = 500
-        window_height = 600
+        # Set window size and center it
+        width = 500
+        height = 500
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
-        x = (screen_width - window_width) // 2
-        y = (screen_height - window_height) // 2
+        x = (screen_width - width) // 2
+        y = (screen_height - height) // 2
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
         
-        self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
-        self.root.overrideredirect(True)  # No window decorations
-        self.root.attributes("-topmost", True)
+        # Make window stay on top
+        self.root.attributes('-topmost', True)
         
-        # Main container
-        container = tk.Frame(self.root, bg=self.bg_color)
-        container.pack(fill=tk.BOTH, expand=True, padx=40, pady=60)
+        # Dark background matching the design
+        self.root.configure(bg='#0e0e12')
         
-        # Title
-        title = tk.Label(
-            container,
-            text="KEYLOGGER DETECTOR",
-            font=("Segoe UI", 24, "bold"),
-            fg=self.text_color,
-            bg=self.bg_color
-        )
-        title.pack(pady=(0, 20))
+        # Create main container
+        main_frame = tk.Frame(self.root, bg='#0e0e12')
+        main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Canvas for rotating rings
+        # Canvas for drawing the rotating rings
         self.canvas = tk.Canvas(
-            container,
-            width=320,
-            height=320,
-            bg=self.bg_color,
+            main_frame,
+            width=400,
+            height=400,
+            bg='#0e0e12',
             highlightthickness=0
         )
         self.canvas.pack(pady=20)
         
-        # Progress percentage
+        # Progress label
         self.progress_label = tk.Label(
-            container,
+            main_frame,
             text="0%",
-            font=("Consolas", 48, "bold"),
-            fg=self.cyan_color,
-            bg=self.bg_color
+            font=('Segoe UI', 24, 'bold'),
+            bg='#0e0e12',
+            fg='#e4e1e8'
         )
-        self.progress_label.pack(pady=10)
+        self.progress_label.pack(pady=5)
         
-        # Status message
+        # Status label
         self.status_label = tk.Label(
-            container,
+            main_frame,
             text="Initializing...",
-            font=("Segoe UI", 11),
-            fg=self.text_dim,
-            bg=self.bg_color
+            font=('Segoe UI', 10),
+            bg='#0e0e12',
+            fg='#94a3b8'
         )
         self.status_label.pack(pady=5)
         
         # Progress bar
-        style = ttk.Style()
-        style.theme_use('default')
-        style.configure(
-            "Loading.Horizontal.TProgressbar",
-            troughcolor=self.bg_color,
-            background=self.cyan_color,
-            borderwidth=0,
-            thickness=3
-        )
-        
         self.progress_bar = ttk.Progressbar(
-            container,
-            style="Loading.Horizontal.TProgressbar",
-            length=300,
-            mode='determinate'
+            main_frame,
+            mode='determinate',
+            length=300
         )
-        self.progress_bar.pack(pady=20)
+        self.progress_bar.pack(pady=10)
         
-        # Start animations
-        self.animation_running = True
-        self._animate_rings()
-        self._update_ui()
+        # Animation state
+        self.angle1 = 0  # Outer ring (clockwise)
+        self.angle2 = 0  # Middle ring (counter-clockwise)
+        self.angle3 = 0  # Inner ring (clockwise)
+        self.animation_running = False
         
-        self.root.mainloop()
+        # Ring parameters
+        self.center_x = 200
+        self.center_y = 200
+        self.ring_colors = ['#00f0ff', '#ff007a', '#3b82f5']  # Cyan, Magenta, Blue
+        
+    def draw_star_ring(self, radius, points, angle, color, width=3):
+        """Draw a star-shaped ring with the given parameters"""
+        coords = []
+        
+        # Create star points
+        for i in range(points * 2):
+            current_angle = (angle + i * 180 / points) * math.pi / 180
+            if i % 2 == 0:
+                # Outer point
+                r = radius
+            else:
+                # Inner point (creates the star effect)
+                r = radius * 0.85
+            
+            x = self.center_x + r * math.cos(current_angle)
+            y = self.center_y + r * math.sin(current_angle)
+            coords.extend([x, y])
+        
+        # Draw the polygon
+        if len(coords) >= 6:
+            return self.canvas.create_polygon(
+                coords,
+                outline=color,
+                fill='',
+                width=width,
+                smooth=True
+            )
+        return None
     
-    def _animate_rings(self):
-        """Animate the rotating concentric rings."""
-        if not self.animation_running or not self.canvas:
+    def animate_rings(self):
+        """Animate the concentric rings"""
+        if not self.animation_running:
             return
-        
+            
         # Clear canvas
-        self.canvas.delete("all")
+        self.canvas.delete('all')
         
-        center_x = 160
-        center_y = 160
+        # Draw ambient glow in center
+        for i in range(10, 0, -1):
+            opacity = int(255 * (i / 20))
+            color = f'#{opacity:02x}{opacity:02x}{opacity:02x}'
+            self.canvas.create_oval(
+                self.center_x - i * 10,
+                self.center_y - i * 10,
+                self.center_x + i * 10,
+                self.center_y + i * 10,
+                outline=color,
+                width=1
+            )
         
-        # Draw outer ring (clockwise, cyan)
-        self._draw_ring(
-            center_x, center_y, 140, 12, self.outer_angle,
-            self.cyan_color, 3
-        )
+        # Draw outer ring (24 points, clockwise, cyan)
+        self.draw_star_ring(150, 24, self.angle1, self.ring_colors[0], width=3)
         
-        # Draw middle ring (counter-clockwise, magenta)
-        self._draw_ring(
-            center_x, center_y, 100, 16, -self.middle_angle,
-            self.magenta_color, 3
-        )
+        # Draw middle ring (18 points, counter-clockwise, magenta)
+        self.draw_star_ring(110, 18, self.angle2, self.ring_colors[1], width=3)
         
-        # Draw inner ring (clockwise, blue)
-        self._draw_ring(
-            center_x, center_y, 60, 20, self.inner_angle,
-            self.blue_color, 3
-        )
+        # Draw inner ring (12 points, clockwise, blue)
+        self.draw_star_ring(70, 12, self.angle3, self.ring_colors[2], width=2)
         
-        # Center dot
+        # Draw center dot
         self.canvas.create_oval(
-            center_x - 5, center_y - 5,
-            center_x + 5, center_y + 5,
-            fill="#ffffff",
-            outline=""
+            self.center_x - 5,
+            self.center_y - 5,
+            self.center_x + 5,
+            self.center_y + 5,
+            fill='#ffffff',
+            outline='#ffffff'
         )
         
         # Update angles
-        self.outer_angle += 1
-        self.middle_angle += 1.5
-        self.inner_angle += 2
+        self.angle1 = (self.angle1 + 1) % 360  # Slow clockwise
+        self.angle2 = (self.angle2 - 1.5) % 360  # Faster counter-clockwise
+        self.angle3 = (self.angle3 + 2) % 360  # Fastest clockwise
         
-        # Schedule next frame
-        if self.root:
-            self.root.after(30, self._animate_rings)
+        # Schedule next animation frame
+        if self.animation_running:
+            self.root.after(30, self.animate_rings)  # ~33 FPS
     
-    def _draw_ring(self, cx, cy, radius, points, rotation, color, width):
-        """Draw a star-shaped ring."""
-        coords = []
-        for i in range(points):
-            angle = (rotation + i * (360 / points)) * math.pi / 180
-            # Alternate between outer and inner radius for star shape
-            r = radius if i % 2 == 0 else radius * 0.85
-            x = cx + r * math.cos(angle)
-            y = cy + r * math.sin(angle)
-            coords.extend([x, y])
-        
-        # Close the polygon
-        coords.extend([coords[0], coords[1]])
-        
-        self.canvas.create_line(
-            *coords,
-            fill=color,
-            width=width,
-            smooth=True
-        )
+    def start_animation(self):
+        """Start the ring animation"""
+        if not self.animation_running:
+            self.animation_running = True
+            self.animate_rings()  # Start the animation loop
     
-    def _update_ui(self):
-        """Update progress display."""
-        if not self.animation_running or not self.root:
-            return
-        
-        try:
-            self.progress_label.config(text=f"{self.current_progress}%")
-            self.status_label.config(text=self.current_status)
-            self.progress_bar['value'] = self.current_progress
-            
-            # Schedule next update
-            self.root.after(100, self._update_ui)
-        except:
-            pass
+    def stop_animation(self):
+        """Stop the ring animation"""
+        self.animation_running = False
     
-    def update_progress(self, percent, status=None):
-        """Update the progress display (thread-safe)."""
-        self.current_progress = int(percent)
+    def update_progress(self, value, status=None):
+        """
+        Update progress bar and percentage
+        
+        Args:
+            value: Progress value (0-100)
+            status: Optional status message
+        """
+        self.progress_bar['value'] = value
+        self.progress_label.config(text=f"{int(value)}%")
+        
         if status:
-            self.current_status = status
+            self.status_label.config(text=status)
+        
+        self.root.update()
+    
+    def show(self):
+        """Show the loading screen"""
+        self.start_animation()
+        self.root.deiconify()
+        self.root.update()
     
     def close(self):
-        """Close the loading screen."""
-        self.animation_running = False
-        if self.root:
-            try:
-                self.root.quit()
-                self.root.destroy()
-            except:
-                pass
+        """Close the loading screen"""
+        self.stop_animation()
+        self.root.destroy()
+
+
+def test_loading_screen():
+    """Test function for the loading screen"""
+    import time
+    
+    loader = LoadingScreen()
+    loader.show()
+    
+    # Simulate loading progress
+    for i in range(0, 101, 5):
+        time.sleep(0.2)
+        status_messages = [
+            "Initializing system...",
+            "Loading configuration...",
+            "Starting monitor...",
+            "Loading ML model...",
+            "Preparing analyzer...",
+            "Setting up database...",
+            "Configuring alerts...",
+            "Almost ready...",
+            "Finalizing...",
+            "Ready!"
+        ]
+        status = status_messages[min(i // 10, len(status_messages) - 1)]
+        loader.update_progress(i, status)
+    
+    time.sleep(1)
+    loader.close()
+
+
+if __name__ == '__main__':
+    test_loading_screen()
