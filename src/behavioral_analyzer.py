@@ -53,11 +53,11 @@ logger = logging.getLogger(__name__)
 
 BUFFER_MAXLEN_KB        = 10_000         # circular buffer size for keystrokes
 BUFFER_MAXLEN_MOUSE     = 50_000         # circular buffer size for mouse events
-MIN_TRAINING_KS         = 10_000         # keystrokes needed for baseline
-MIN_TRAINING_MOUSE      = 15_000         # mouse movements needed for baseline
+MIN_TRAINING_KS         = 2_000          # keystrokes needed for baseline
+MIN_TRAINING_MOUSE      = 3_000          # mouse movements needed for baseline
 ANALYSIS_WINDOW_SECS    = 60             # seconds per analysis cycle
-MIN_KS_FOR_ANALYSIS     = 20             # minimum keystrokes needed to analyse
-MIN_MOUSE_FOR_ANALYSIS  = 15             # minimum mouse movements to analyse
+MIN_KS_FOR_ANALYSIS     = 5              # minimum keystrokes needed to analyse (LOWERED FOR FASTER COLLECTION)
+MIN_MOUSE_FOR_ANALYSIS  = 5              # minimum mouse movements to analyse (LOWERED FOR FASTER COLLECTION)
 
 # Z-score thresholds
 Z_YELLOW = 2.0   # 2σ — slightly unusual

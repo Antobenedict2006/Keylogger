@@ -48,6 +48,12 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
+try:
+    from plyer import notification
+    PLYER_AVAILABLE = True
+except ImportError:
+    PLYER_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -996,6 +1002,9 @@ class RecordingManager:
 
         Returns the Path of the exported CSV, or None if nothing was captured.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         with self._lock:
             if not self._recording:
                 return self._last_csv_path
@@ -1003,26 +1012,31 @@ class RecordingManager:
             session_id = self._session_id
             count      = self._count
 
+        logger.info(f"RecordingManager.stop() called: session_id={session_id}, count={count}")
+
         # Signal poll thread to exit
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=self.POLL_INTERVAL + 2)
 
         if count == 0 or not session_id:
+            logger.warning(f"No CSV export: count={count}, session_id={session_id}")
             return None
 
         # Export to CSV
         ts  = time.strftime("%Y%m%d_%H%M%S")
         out = Path(__file__).parent.parent.parent / "data" / f"my_behavior_{ts}.csv"
+        logger.info(f"Attempting CSV export to: {out}")
+        
         try:
             rows_written = self._store.export_to_csv(out, session_id=session_id)
+            logger.info(f"CSV export successful: {rows_written} rows written to {out}")
             with self._lock:
                 self._last_csv_path = out
             return out if rows_written > 0 else None
         except Exception as exc:
             # Export failed — keep data in DB, tell caller via None
-            import logging
-            logging.getLogger(__name__).error("CSV export failed: %s", exc)
+            logger.error(f"CSV export failed: {exc}", exc_info=True)
             return None
 
     # ------------------------------------------------------------------
@@ -1528,7 +1542,12 @@ class _TrainModelTab(ttk.Frame):
         # Stop returns None if nothing captured yet
         count   = self._recorder.count
         elapsed = self._recorder.elapsed_seconds
+        
+        logger.info(f"Stop Recording clicked: count={count}, elapsed={elapsed:.1f}s")
+        
         csv_out = self._recorder.stop()
+        
+        logger.info(f"Recorder.stop() returned: {csv_out}")
 
         self._cancel_tick()
         self._btn_stop.config(state=tk.DISABLED)
@@ -1538,12 +1557,17 @@ class _TrainModelTab(ttk.Frame):
         )
 
         if csv_out is None or count == 0:
+            logger.warning(f"No CSV exported: csv_out={csv_out}, count={count}")
             messagebox.showwarning(
                 "No Data Recorded",
-                "No new user-launched processes were captured during this session.\n\n"
-                "Tips:\n"
-                "• Open some applications after clicking Start Recording.\n"
-                "• Run for at least 5 minutes to capture enough samples.",
+                f"No new user-launched processes were captured during this session.\n\n"
+                f"Processes captured: {count}\n"
+                f"Recording duration: {int(elapsed)} seconds\n\n"
+                f"Tips:\n"
+                f"• Open some applications AFTER clicking Start Recording\n"
+                f"• Launch at least 50 different apps (Chrome, Notepad, Calculator, etc.)\n"
+                f"• Apps already running when you clicked Start are not counted\n\n"
+                f"The counter must show a number > 0 before stopping.",
             )
             return
 
@@ -2380,7 +2404,8 @@ class _BehavioralAnalysisTab(ttk.Frame):
 
         eta_d, eta_h = prog["eta_days"], prog["eta_hours"]
         if pct >= 100:
-            self._train_eta_lbl.config(text="Complete ✓", fg=C["safe"])
+            self._train_eta_lbl.config(text="✅ Complete — Baseline Saved!", fg=C["safe"])
+            self._show_baseline_saved_banner()
         else:
             self._train_eta_lbl.config(text=f"~{eta_d}d {eta_h}h", fg=C["text"])
 
@@ -2389,6 +2414,59 @@ class _BehavioralAnalysisTab(ttk.Frame):
         wpm_txt = f"{km.wpm:.0f} WPM" if km and km.is_sufficient else "Waiting typing..."
         spd_txt = f"{mm.avg_speed_pxsec:.0f} px/s" if mm and mm.is_sufficient else "Waiting mouse..."
         self._train_speed_lbl.config(text=f"{wpm_txt} | {spd_txt}")
+
+    def _show_baseline_saved_banner(self) -> None:
+        """
+        Show a green banner and desktop notification when baseline training completes.
+        Only fires once per session using a guard flag.
+        """
+        # Guard: Only show once per session
+        if getattr(self, "_baseline_banner_shown", False):
+            return
+        
+        self._baseline_banner_shown = True
+        
+        # Create green success banner
+        banner = tk.Frame(
+            self._training_frame,
+            bg="#16a34a",  # Green background
+            padx=16,
+            pady=12
+        )
+        banner.pack(fill=tk.X, pady=(8, 0))
+        
+        # Bold title label
+        title_lbl = tk.Label(
+            banner,
+            text="✅  Baseline profile saved automatically to data/",
+            bg="#16a34a",
+            fg="#ffffff",
+            font=("Segoe UI", 10, "bold"),
+            anchor="w"
+        )
+        title_lbl.pack(fill=tk.X)
+        
+        # Smaller subtitle label
+        subtitle_lbl = tk.Label(
+            banner,
+            text="Behavioral anomaly detection is now ACTIVE",
+            bg="#16a34a",
+            fg="#ffffff",
+            font=("Segoe UI", 9),
+            anchor="w"
+        )
+        subtitle_lbl.pack(fill=tk.X, pady=(2, 0))
+        
+        # Desktop notification
+        if PLYER_AVAILABLE:
+            try:
+                notification.notify(
+                    title="✅ KeyGuard AI — Behavioral Baseline Complete",
+                    message="Your personal typing & mouse profile has been saved.\nAnomaly detection is now active and protecting you.",
+                    timeout=8
+                )
+            except Exception:
+                pass  # Silently fail if notification doesn't work
 
     def _animate_progress(self, target_pct: float) -> None:
         """Smoothly glide progress bar towards target with cubic ease-out."""
