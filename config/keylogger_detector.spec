@@ -25,6 +25,10 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 import sys
 from pathlib import Path
 
+# Define project root (parent of config folder where this spec file is located)
+PROJECT_ROOT = Path(SPECPATH).parent
+ICON_PATH = PROJECT_ROOT / 'assets' / 'icon.ico'
+
 block_cipher = None
 
 # ---------------------------------------------------------------------------
@@ -32,8 +36,8 @@ block_cipher = None
 # ---------------------------------------------------------------------------
 
 a = Analysis(
-    ['main.py'],
-    pathex=[],
+    [str(PROJECT_ROOT / 'main.py')],
+    pathex=[str(PROJECT_ROOT)],
     binaries=[],
     datas=[
         # Note: These files are optional. If they don't exist, they'll be created
@@ -166,7 +170,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='icon.ico',             # Application icon (create this if it doesn't exist)
+    icon=str(ICON_PATH),             # Updated to use assets/icon.ico
     version_file=None,           # Optional: create a version_info.txt for metadata
 )
 

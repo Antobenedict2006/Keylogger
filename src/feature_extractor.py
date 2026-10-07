@@ -143,7 +143,8 @@ class FeatureVector:
     features: np.ndarray = field(repr=False)   # shape (NUM_FEATURES,), dtype float32
 
     # Human-readable breakdown for alert explanations
-    active_indicators: List[str] = field(default_factory=list)
+    active_indicators: List[str] = field(default_factory=list)  # Technical version
+    plain_indicators: List[str] = field(default_factory=list)   # Plain English version
 
     def to_dict(self) -> dict:
         return {name: float(self.features[i]) for i, name in enumerate(FEATURE_NAMES)}
@@ -377,6 +378,22 @@ class FeatureExtractor:
             has_kernel_hooks=has_kernel_hooks,
             uses_raw_input_api=uses_raw_input_api,
         )
+        
+        # ---- Build plain English indicators for non-technical users ------
+        plain_indicators = self._build_plain_indicators(
+            hook_api_present=hook_api_present,
+            has_ll_keyboard_hook=has_ll_keyboard_hook,
+            hook_no_window=hook_no_window,
+            hook_with_network=hook_with_network,
+            has_startup_entry=has_startup_entry,
+            running_from_temp=running_from_temp,
+            net_bytes_sent_sum=net_bytes_sent_sum,
+            file_write_rate=file_write_rate,
+            no_exe_path=no_exe_path,
+            hook_related_dll_count=hook_related_dll_count,
+            has_kernel_hooks=has_kernel_hooks,
+            uses_raw_input_api=uses_raw_input_api,
+        )
 
         return FeatureVector(
             pid=latest.pid,
@@ -385,6 +402,7 @@ class FeatureExtractor:
             snapshot_time=latest.snapshot_time,
             features=features,
             active_indicators=indicators,
+            plain_indicators=plain_indicators,
         )
 
     # ------------------------------------------------------------------
@@ -466,3 +484,45 @@ class FeatureExtractor:
             )
 
         return reasons
+
+    @staticmethod
+    def _build_plain_indicators(
+        hook_api_present: int,
+        has_ll_keyboard_hook: int,
+        hook_no_window: int,
+        hook_with_network: int,
+        has_startup_entry: int,
+        running_from_temp: int,
+        net_bytes_sent_sum: float,
+        file_write_rate: float,
+        no_exe_path: int,
+        hook_related_dll_count: int,
+        has_kernel_hooks: int = 0,
+        uses_raw_input_api: int = 0,
+    ) -> List[str]:
+        """
+        Return PLAIN ENGLISH reasons this process was flagged.
+        
+        This is a wrapper around _build_indicators() that translates
+        technical jargon into user-friendly language for non-technical users.
+        No AI/API is used - just simple dictionary-based translation.
+        """
+        # Get technical indicators first
+        technical_indicators = FeatureExtractor._build_indicators(
+            hook_api_present=hook_api_present,
+            has_ll_keyboard_hook=has_ll_keyboard_hook,
+            hook_no_window=hook_no_window,
+            hook_with_network=hook_with_network,
+            has_startup_entry=has_startup_entry,
+            running_from_temp=running_from_temp,
+            net_bytes_sent_sum=net_bytes_sent_sum,
+            file_write_rate=file_write_rate,
+            no_exe_path=no_exe_path,
+            hook_related_dll_count=hook_related_dll_count,
+            has_kernel_hooks=has_kernel_hooks,
+            uses_raw_input_api=uses_raw_input_api,
+        )
+        
+        # Translate to plain English
+        from .indicator_translator import translate_indicators_list
+        return translate_indicators_list(technical_indicators)

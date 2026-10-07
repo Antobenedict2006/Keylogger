@@ -198,6 +198,11 @@ class _DetailPopup(tk.Toplevel):
                 reasons = json.loads(reasons)
             except Exception:
                 reasons = [reasons]
+        
+        # Translate to plain English
+        from ..indicator_translator import translate_indicators_list
+        if reasons:
+            reasons = translate_indicators_list(reasons)
 
         # Text widget with better styling
         tb = tk.Text(frm, height=9, bg="#fafbfc", fg=C["text"],
@@ -582,13 +587,26 @@ class _HistoryTab(ttk.Frame):
 
         for row in rows:
             risk_val = row.get("risk_level", "").lower()
+            
+            # Get indicators from reasons field - use plain English version
+            reasons = row.get("reasons", [])
+            if isinstance(reasons, list) and reasons:
+                # Translate to plain English
+                from ..indicator_translator import translate_indicators_list
+                plain_reasons = translate_indicators_list(reasons)
+                indicators_text = "; ".join(plain_reasons[:2])  # Show first 2
+                if len(plain_reasons) > 2:
+                    indicators_text += f" (+{len(plain_reasons) - 2} more)"
+            else:
+                indicators_text = ""
+            
             self._tree.insert("", tk.END, values=(
                 _fmt_datetime(row.get("detected_at", 0)),
                 row.get("pid", ""),
                 row.get("process_name", ""),
                 risk_val.upper(),
                 f"{float(row.get('score', 0)):.1%}",
-                "Yes" if row.get("actioned") else "No",
+                indicators_text,  # Plain English indicators
             ), tags=(risk_val,))
 
     def _on_dbl(self, _e) -> None:
@@ -3393,7 +3411,10 @@ class Dashboard:
                     # Flatten reasons list to a semicolon-separated string
                     reasons = row.get("reasons", [])
                     if isinstance(reasons, list):
-                        row["reasons"] = "; ".join(reasons)
+                        # Translate to plain English for CSV export
+                        from ..indicator_translator import translate_indicators_list
+                        plain_reasons = translate_indicators_list(reasons)
+                        row["reasons"] = "; ".join(plain_reasons)
                     row["actioned"] = "Yes" if row.get("actioned") else "No"
                     writer.writerow(row)
 
@@ -3563,7 +3584,10 @@ class Dashboard:
 
                 reasons = row.get("reasons", [])
                 if isinstance(reasons, list):
-                    reasons_str = "; ".join(reasons[:2])
+                    # Translate to plain English for PDF
+                    from ..indicator_translator import translate_indicators_list
+                    plain_reasons = translate_indicators_list(reasons)
+                    reasons_str = "; ".join(plain_reasons[:2])
                 else:
                     reasons_str = str(reasons)
                 # Truncate long indicator strings
