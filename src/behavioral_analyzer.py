@@ -71,13 +71,16 @@ BOT_BURST_SECS        = 60     # single continuous burst > 60s
 BOT_MIN_CURVATURE     = 1.05   # curvature < 1.05 = straight geometric paths
 BOT_MIN_JITTER        = 1.0    # jitter < 1.0px = no natural hand tremor
 
-DEFAULT_DATA_DIR = Path(__file__).parent.parent / "data"
-DEFAULT_BASELINE_PATH = DEFAULT_DATA_DIR / "typing_baseline.json"
-DEFAULT_MOUSE_BASELINE_PATH = DEFAULT_DATA_DIR / "mouse_baseline.json"
-DEFAULT_MY_BEHAVIOR_PATH = DEFAULT_DATA_DIR / "my_behavior.json"
-DEFAULT_KEYBOARD_EXPORT_PATH = DEFAULT_DATA_DIR / "keyboard_behavior.json"
-DEFAULT_MOUSE_EXPORT_PATH = DEFAULT_DATA_DIR / "mouse_behavior.json"
-DEFAULT_COMBINED_EXPORT_PATH = DEFAULT_DATA_DIR / "behavioral_profile.json"
+from src.paths import get_data_path, get_user_data_root
+
+# Default paths using centralized path resolution (works for both dev and frozen .exe)
+DEFAULT_DATA_DIR = get_user_data_root() / "data"
+DEFAULT_BASELINE_PATH = get_data_path("data", "typing_baseline.json")
+DEFAULT_MOUSE_BASELINE_PATH = get_data_path("data", "mouse_baseline.json")
+DEFAULT_MY_BEHAVIOR_PATH = get_data_path("data", "my_behavior.json")
+DEFAULT_KEYBOARD_EXPORT_PATH = get_data_path("data", "keyboard_behavior.json")
+DEFAULT_MOUSE_EXPORT_PATH = get_data_path("data", "mouse_behavior.json")
+DEFAULT_COMBINED_EXPORT_PATH = get_data_path("data", "behavioral_profile.json")
 
 
 # ---------------------------------------------------------------------------

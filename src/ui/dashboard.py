@@ -1041,9 +1041,10 @@ class RecordingManager:
             logger.warning(f"No CSV export: count={count}, session_id={session_id}")
             return None
 
-        # Export to CSV
+        # Export to CSV using centralized path resolution
+        from ..paths import get_data_path
         ts  = time.strftime("%Y%m%d_%H%M%S")
-        out = Path(__file__).parent.parent.parent / "data" / f"my_behavior_{ts}.csv"
+        out = get_data_path("data", f"my_behavior_{ts}.csv")
         logger.info(f"Attempting CSV export to: {out}")
         
         try:
@@ -1694,7 +1695,8 @@ class _TrainModelTab(ttk.Frame):
             # Late import keeps startup fast and avoids circular deps
             import sys
             from pathlib import Path as _P
-            proj_root = _P(__file__).parent.parent.parent
+            from ..paths import get_user_data_root
+            proj_root = get_user_data_root()
             if str(proj_root) not in sys.path:
                 sys.path.insert(0, str(proj_root))
             from tools.train_model import train_personalized
@@ -2456,7 +2458,7 @@ class _BehavioralAnalysisTab(ttk.Frame):
         # Bold title label
         title_lbl = tk.Label(
             banner,
-            text="✅  Baseline profile saved automatically to data/",
+            text="✅  Baseline profile saved automatically to AppData\\Local\\KeyloggerDetector\\data\\",
             bg="#16a34a",
             fg="#ffffff",
             font=("Segoe UI", 10, "bold"),
@@ -2799,12 +2801,13 @@ class _BehavioralAnalysisTab(ttk.Frame):
             messagebox.showinfo(
                 "Confirmed & Saved",
                 "✅ Session confirmed as yours!\n\n"
-                "Multi-modal telemetry saved to data/my_behavior.json.\n"
+                "Multi-modal telemetry saved to AppData\\Local\\KeyloggerDetector\\data\\my_behavior.json.\n"
                 "Adaptive baseline updated with your latest patterns."
             )
 
     def _view_my_behavior_json(self) -> None:
-        path = self._engine.my_behavior_path if self._engine else Path(__file__).parent.parent.parent / "data" / "my_behavior.json"
+        from ..paths import get_data_path
+        path = self._engine.my_behavior_path if self._engine else get_data_path("data", "my_behavior.json")
         if not path.exists():
             messagebox.showinfo(
                 "No Saved Profile Yet",
@@ -3738,8 +3741,9 @@ class Dashboard:
         """Open documentation file (NEW)."""
         try:
             from pathlib import Path
+            from ..paths import get_user_data_root
             import os
-            doc_path = Path(__file__).parent.parent.parent / filename
+            doc_path = get_user_data_root() / filename
             if doc_path.exists():
                 os.startfile(str(doc_path))
             else:
