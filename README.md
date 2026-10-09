@@ -13,7 +13,7 @@
 
 ### 🧠 Multi-Modal Behavioral Biometrics (Keyboard + Mouse)
 - **Mouse Movement & Click Dynamics Tracking** — Trajectory curvature, micro-tremors/jitter, velocity, acceleration, click hold time, double-click intervals, and 3x3 screen quadrant heatmaps.
-- **Combined Keyboard + Mouse Fusion Scoring** — Elevates detection accuracy from 70–80% (keyboard alone) to **90–95%** with weighted fusion ($0.40 \text{ KB} + 0.40 \text{ Mouse} + 0.20 \text{ Pattern}$).
+- **Combined Keyboard + Mouse Fusion Scoring** — Elevates detection accuracy from 70–80% (design target based on internal thresholds, not yet validated against a labeled real-world test set) (keyboard alone) to **90–95%** (design target based on internal thresholds, not yet validated against a labeled real-world test set) with weighted fusion ($0.40 \text{ KB} + 0.40 \text{ Mouse} + 0.20 \text{ Pattern}$).
 - **Multi-Modal Bot Detection** — Classifies automation into 4 distinct bot signatures:
   1. *Keyboard Macro* (`keyboard_macro` — mechanical typing without mouse)
   2. *Remote Control* (`remote_control` — straight geometric cursor paths)
@@ -63,7 +63,7 @@
 - **Real-time monitoring** - Continuous process scanning every 5 seconds
 - **ML-based detection** - Trained scikit-learn model with 26 behavioural features
 - **Heuristic fallback** - Works without trained model using pattern matching
-- **Multi-factor analysis** - Keyboard hooks, window visibility, system processes, startup entries
+- **Multi-factor analysis** - Detects keyboard hook API usage IN OTHER PROCESSES as a threat indicator, window visibility, system processes, startup entries
 - ✅ **Digital signature verification** — Windows Authenticode via WinVerifyTrust()
 - ✅ **Kernel-level hook detection** — SSDT & driver enumeration via NtQuerySystemInformation
 - ✅ **Raw Input API monitoring** — Detects keyloggers using RegisterRawInputDevices
@@ -304,7 +304,8 @@ ProcessMonitor → FeatureExtractor → KeyloggerClassifier
 #### 1. **ProcessMonitor** (`src/monitor.py`)
 - Scans running processes every N seconds
 - Extracts process metadata (PID, name, executable path)
-- Detects keyboard hooks, windows, startup entries
+- Detects keyboard hook API usage in other processes (not hooks used by this app itself), windows, startup entries
+- This app's own behavioral biometric capture uses zero-hook polling methods (GetAsyncKeyState at 250Hz, GetCursorPos at 20Hz). This is a deliberate engineering tradeoff: polling-based capture reduces performance overhead and crash risk compared to OS-level hook injection, at the cost of not using Windows' native injected-input flags (e.g. LLKHF_INJECTED) as a detection signal. Adding hook-based verification as a second detection layer is a planned future improvement.
 
 #### 2. **FeatureExtractor** (`src/feature_extractor.py`)
 - Converts process snapshots to feature vectors
@@ -333,6 +334,25 @@ ProcessMonitor → FeatureExtractor → KeyloggerClassifier
 - **NEW:** Modern design with interactive elements
 
 ### Database Schema
+
+The system uses SQLite with **8 tables** organized into three functional groups:
+
+**Core Detection (4 tables):**
+- `detections` — main detection classification log
+- `actions` — user response tracking (terminate/quarantine/whitelist/dismiss)
+- `feature_vectors` — ML feature vectors per detection
+- `process_snapshots` — rolling audit log (OFF by default, enabled via `--log-snapshots`)
+
+**Behavioral Biometrics (3 tables):**
+- `typing_behavior` — keyboard timing baselines
+- `mouse_behavior` — mouse movement baselines  
+- `behavioral_alerts` — behavioral anomaly alerts
+
+**Training Data (1 table):**
+- `behavior_recordings` — user-labeled safe process samples for model training
+
+<details>
+<summary><strong>Click to view simplified schema example (3 core tables)</strong></summary>
 
 ```sql
 -- Detections table
@@ -378,6 +398,10 @@ CREATE TABLE process_snapshots (
     snapshot_time REAL
 );
 ```
+
+*Note: This shows 3 core tables. See `src/db_logger.py` for complete 8-table schema.*
+
+</details>
 
 ---
 

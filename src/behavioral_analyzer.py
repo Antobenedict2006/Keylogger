@@ -78,6 +78,7 @@ DEFAULT_DATA_DIR = get_user_data_root() / "data"
 DEFAULT_BASELINE_PATH = get_data_path("data", "typing_baseline.json")
 DEFAULT_MOUSE_BASELINE_PATH = get_data_path("data", "mouse_baseline.json")
 DEFAULT_MY_BEHAVIOR_PATH = get_data_path("data", "my_behavior.json")
+DEFAULT_PROGRESS_PATH = get_data_path("data", "baseline_progress.json")
 DEFAULT_KEYBOARD_EXPORT_PATH = get_data_path("data", "keyboard_behavior.json")
 DEFAULT_MOUSE_EXPORT_PATH = get_data_path("data", "mouse_behavior.json")
 DEFAULT_COMBINED_EXPORT_PATH = get_data_path("data", "behavioral_profile.json")
@@ -1508,7 +1509,7 @@ class MultiModalAnomalyDetector:
             result.status = "orange"
             result.status_label = "⚠️ Suspicious Activity"
             result.possible_causes = [
-                "Different person using this computer (78% likely)",
+                "Different person using this computer",
                 "Automated script or bot running in background",
                 "Unusual user state (rushed, gaming, or stressed)",
             ]
@@ -1516,7 +1517,7 @@ class MultiModalAnomalyDetector:
             result.status = "red"
             result.status_label = "🔴 Anomaly Detected"
             result.possible_causes = [
-                "Unauthorized user on system (92% likely)",
+                "Unauthorized user on system",
                 "Active automated replay attack or macro",
                 "Remote control session detected",
             ]
@@ -2180,6 +2181,7 @@ class BehavioralAnalysisEngine:
         self._analysis_window = analysis_window_secs
         self._db_store = db_store
         self._my_behavior_path = Path(my_behavior_path)
+        self._progress_path = DEFAULT_PROGRESS_PATH
 
         self._kb_recorder = KeystrokeRecorder()
         self._mouse_recorder = MouseRecorder()
@@ -2193,6 +2195,10 @@ class BehavioralAnalysisEngine:
 
         self._running = False
         self._thread: Optional[threading.Thread] = None
+
+        # Progress tracking for baseline training
+        self._last_progress_save = 0.0
+        self._last_keystroke_count = 0
 
         # Anomaly state
         self._anomaly_start: Optional[float] = None
@@ -2282,7 +2288,93 @@ class BehavioralAnalysisEngine:
     def is_training_complete(self) -> bool:
         return self._learner.is_training_complete(self.total_keystrokes, self.total_mouse_movements)
 
+    def _load_progress(self) -> None:
+        """Load progress from baseline_progress.json if it exists."""
+        try:
+            if self._progress_path.exists():
+                with open(self._progress_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    kb_count = data.get("keystrokes_recorded", 0)
+                    mouse_count = data.get("mouse_movements_recorded", 0)
+                    
+                    # Try to restore sample data (keyboard and mouse independently)
+                    kb_restored = False
+                    mouse_restored = False
+                    
+                    try:
+                        kb_samples_data = data.get("kb_samples", [])
+                        restored_kb = []
+                        for sample_dict in kb_samples_data:
+                            try:
+                                restored_kb.append(TypingMetrics(**sample_dict))
+                            except Exception as sample_exc:
+                                logger.debug("Skipping invalid kb sample: %s", sample_exc)
+                        self._learner._kb_samples = restored_kb
+                        kb_restored = True  # reconstruction process succeeded, even if list ended up empty (genuinely no samples yet)
+                    except Exception as exc:
+                        logger.warning("Could not restore kb sample data: %s", exc)
+                    
+                    try:
+                        mouse_samples_data = data.get("mouse_samples", [])
+                        restored_mouse = []
+                        for sample_dict in mouse_samples_data:
+                            try:
+                                restored_mouse.append(MouseMetrics(**sample_dict))
+                            except Exception as sample_exc:
+                                logger.debug("Skipping invalid mouse sample: %s", sample_exc)
+                        self._learner._mouse_samples = restored_mouse
+                        mouse_restored = True
+                    except Exception as exc:
+                        logger.warning("Could not restore mouse sample data: %s", exc)
+                    
+                    if kb_restored:
+                        self._kb_recorder._total_recorded = kb_count
+                    else:
+                        logger.warning("Could not restore kb samples, kb progress starting fresh.")
+                    
+                    if mouse_restored:
+                        self._mouse_recorder._total_movements = mouse_count
+                    else:
+                        logger.warning("Could not restore mouse samples, mouse progress starting fresh.")
+                    
+                    if kb_restored or mouse_restored:
+                        logger.info(
+                            "Resuming baseline progress: %d/%d keystrokes, %d/%d mouse movements recorded previously.",
+                            self._kb_recorder._total_recorded, MIN_TRAINING_KS, 
+                            self._mouse_recorder._total_movements, MIN_TRAINING_MOUSE
+                        )
+        except Exception as exc:
+            logger.warning("Failed to load baseline progress: %s", exc)
+
+    def _save_progress(self) -> None:
+        """Save current progress to baseline_progress.json."""
+        try:
+            progress_data = {
+                "keystrokes_recorded": self.total_keystrokes,
+                "mouse_movements_recorded": self.total_mouse_movements,
+                "last_saved": time.time(),
+                "kb_samples": [asdict(s) for s in self._learner._kb_samples],
+                "mouse_samples": [asdict(s) for s in self._learner._mouse_samples],
+            }
+            self._progress_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._progress_path, "w", encoding="utf-8") as f:
+                json.dump(progress_data, f, indent=2)
+        except Exception as exc:
+            logger.warning("Failed to save baseline progress: %s", exc)
+
+    def _delete_progress(self) -> None:
+        """Delete baseline_progress.json after baseline completes."""
+        try:
+            if self._progress_path.exists():
+                self._progress_path.unlink()
+                logger.debug("Deleted baseline progress file.")
+        except Exception as exc:
+            logger.warning("Failed to delete baseline progress: %s", exc)
+
     def start(self) -> bool:
+        # Load any existing progress before starting recorders
+        self._load_progress()
+        
         # Apply initial mouse tracking settings
         self._mouse_recorder.set_precision(self.settings.get("mouse_precision", "normal"))
         self._mouse_recorder.enable_mouse_tracking(self.settings.get("mouse_tracking_enabled", True))
@@ -2495,6 +2587,17 @@ class BehavioralAnalysisEngine:
         self._learner.add_kb_sample(km)
         self._learner.add_mouse_sample(mm)
 
+        # Save progress periodically if baseline not yet complete
+        if not self.is_baseline_available:
+            now = time.time()
+            keystroke_delta = self.total_keystrokes - self._last_keystroke_count
+            
+            # Save every 30 seconds OR every 50 keystrokes, whichever comes first
+            if (now - self._last_progress_save >= 30.0) or (keystroke_delta >= 50):
+                self._save_progress()
+                self._last_progress_save = now
+                self._last_keystroke_count = self.total_keystrokes
+
         # Switch latency & correlation estimation
         last_kb = self._kb_recorder.last_event_ts
         last_m = self._mouse_recorder.last_event_ts
@@ -2520,6 +2623,8 @@ class BehavioralAnalysisEngine:
                 self.export_keyboard_json()
                 self.export_mouse_json()
                 self.export_combined_profile_json()
+                # Delete progress file now that baseline is complete
+                self._delete_progress()
                 logger.info("Multi-modal baseline complete and exported.")
             except Exception as exc:
                 logger.error("Baseline computation error: %s", exc)

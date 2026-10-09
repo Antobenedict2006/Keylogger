@@ -58,11 +58,11 @@ MIN_TRAINING_MOUSE      = 3_000          # mouse movements needed for baseline
 
 | Sample Size | Detection Accuracy | Training Time | Recommendation |
 |-------------|-------------------|---------------|----------------|
-| 100 | ⚠️ 60-70% | 1 hour | ❌ Too small (testing only) |
-| **2,000** | ✅ **85-90%** | **1-3 days** | ✅ **RECOMMENDED** |
-| 10,000 | ✅ 95%+ | 1-2 weeks | ⚠️ Too long for most users |
+| 100 | ⚠️ 60-70% (design target based on internal thresholds, not yet validated against a labeled real-world test set) | 1 hour | ❌ Too small (testing only) |
+| **2,000** | ✅ **85-90%** (design target based on internal thresholds, not yet validated against a labeled real-world test set) | **1-3 days** | ✅ **RECOMMENDED** |
+| 10,000 | ✅ 95%+ (design target based on internal thresholds, not yet validated against a labeled real-world test set) | 1-2 weeks | ⚠️ Too long for most users |
 
-**Verdict:** 2,000 keystrokes provides **good accuracy** with **reasonable training time**
+**Verdict:** 2,000 keystrokes provides **good accuracy** (design target based on internal thresholds, not yet validated against a labeled real-world test set) with **reasonable training time**
 
 ---
 
@@ -72,13 +72,13 @@ MIN_TRAINING_MOUSE      = 3_000          # mouse movements needed for baseline
 
 ✅ **Faster Training:** 1-3 days instead of 1-2 weeks
 ✅ **User-Friendly:** Users won't abandon training due to long wait
-✅ **Still Effective:** 85-90% accuracy is excellent for personal use
+✅ **Still Effective:** 85-90% (design target based on internal thresholds, not yet validated against a labeled real-world test set) accuracy is excellent for personal use
 ✅ **Balanced:** Good compromise between speed and accuracy
 ✅ **Practical:** Most users complete training in their first week
 
 ### **Considerations:**
 
-⚠️ **Slightly Lower Accuracy:** 85-90% vs 95%+ (still very good)
+⚠️ **Slightly Lower Accuracy:** 85-90% (design target based on internal thresholds, not yet validated against a labeled real-world test set) vs 95%+ (design target based on internal thresholds, not yet validated against a labeled real-world test set) (still very good)
 ⚠️ **Less Data:** May be less robust to unusual typing conditions
 ✅ **Sufficient:** More than enough for personal behavioral profiling
 ✅ **Can Retrain:** Users can always collect more data later
@@ -169,14 +169,14 @@ Sample Size Analysis:
 ├─ 2,000 keystrokes
 │   ├─ ~400 unique key pairs analyzed
 │   ├─ ~50 typing bursts recorded
-│   └─ Statistical confidence: 85-90%
+│   └─ Statistical confidence: 85-90% (design target based on internal thresholds, not yet validated against a labeled real-world test set)
 │
 ├─ 3,000 mouse movements
 │   ├─ ~200 movement segments analyzed
 │   ├─ ~100 click events recorded
-│   └─ Statistical confidence: 85-90%
+│   └─ Statistical confidence: 85-90% (design target based on internal thresholds, not yet validated against a labeled real-world test set)
 │
-└─ Combined multimodal confidence: 90-95%
+└─ Combined multimodal confidence: 90-95% (design target based on internal thresholds, not yet validated against a labeled real-world test set)
 ```
 
 **Statistical Power:**
@@ -268,7 +268,7 @@ But 2,000 is recommended for actual use.
 - ✅ Keystroke requirement: 10,000 → **2,000**
 - ✅ Mouse requirement: 15,000 → **3,000**
 - ✅ Training time: 1-2 weeks → **1-3 days**
-- ✅ Accuracy maintained: **85-90%** (excellent)
+- ✅ Accuracy maintained: **85-90%** (design target based on internal thresholds, not yet validated against a labeled real-world test set) (excellent)
 - ✅ User-friendly: **Much faster baseline completion**
 
 **Your KeyGuard AI system is now configured for faster, user-friendly baseline training!**

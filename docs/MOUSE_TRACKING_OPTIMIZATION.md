@@ -82,7 +82,7 @@ Tested on Windows 11 with 500 Hz high-frequency mouse simulation:
 | **Events Processed / sec** | 500 / sec | **20–24 / sec** | **95.2% reduction** |
 | **CPU Overhead during movement** | 6.5% – 8.2% | **< 0.2%** | **> 35× lower** |
 | **Cursor Feel** | Stuttering / Laggy | **Completely Smooth** | **Zero UI Lag** |
-| **Biometric Accuracy** | 93.2% | **93.2% (Identical)** | **Preserved 100%** |
+| **Biometric Accuracy** | 93.2% (design target based on internal thresholds, not yet validated against a labeled real-world test set) | **93.2% (Identical)** (design target based on internal thresholds, not yet validated against a labeled real-world test set) | **Preserved 100%** |
 
 ---
 

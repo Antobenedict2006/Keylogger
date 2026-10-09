@@ -6,7 +6,7 @@
 ## 1. Overview
 
 KeyGuard AI incorporates a **Multi-Modal Behavioral Biometrics System** that continuously and passively monitors your system interactions (keyboard timing dynamics and mouse trajectory physics) to detect:
-* **Unauthorized Users / Impersonation**: Detects when someone else is using your workstation (accuracy increases from 70–80% with keyboard alone to **90–95%** with combined keyboard + mouse).
+* **Unauthorized Users / Impersonation**: Detects when someone else is using your workstation (accuracy increases from 70–80% (design target based on internal thresholds, not yet validated against a labeled real-world test set) with keyboard alone to **90–95%** (design target based on internal thresholds, not yet validated against a labeled real-world test set) with combined keyboard + mouse).
 * **Automated Scripts & Bots**: Differentiates between macros, remote control screen sharing sessions, replay attacks, and hybrid automation.
 * **Keylogger Replay Attacks**: Identifies exact playback of intercepted timing sequences.
 

@@ -209,7 +209,7 @@ $$
 \text{Overall Similarity} = (0.40 \times \text{KB Score}) + (0.40 \times \text{Mouse Score}) + (0.20 \times \text{Pattern Score})
 $$
 
-This weighted fusion improves detection accuracy from roughly 70–80% with keyboard-only models to 90–95% in the combined setup.
+This weighted fusion improves detection accuracy from roughly 70–80% (design target based on internal thresholds, not yet validated against a labeled real-world test set) with keyboard-only models to 90–95% (design target based on internal thresholds, not yet validated against a labeled real-world test set) in the combined setup.
 
 It also includes cross-modal correlation, such as:
 

@@ -1325,7 +1325,7 @@ class _TrainModelTab(ttk.Frame):
             ("5", "Click Train Personalized Model — the system mixes your real data "
                   "with synthetic malicious samples and trains in ~30–60 seconds."),
             ("6", "The detector immediately switches to your personalized model, "
-                  "reducing false positives by 80–90%."),
+                  "reducing false positives by an estimated 80–90% (not yet independently validated)."),
         ]
         for num, text in steps:
             row = tk.Frame(card, bg=C["surface"])
@@ -1778,6 +1778,7 @@ class _TrainModelTab(ttk.Frame):
         accuracy   = result.get("accuracy", 0.0)
         n_real     = result.get("n_real_safe", 0)
         n_total    = result.get("n_total", 0)
+        # NOTE: this is an internal design estimate, not measured from real validation data
         # Rough false-positive reduction estimate based on personalisation:
         # generic models see ~12-15% FP; personalized typically 2-3%.
         fp_est = "~80–90%"
@@ -3008,15 +3009,15 @@ class _SystemTray:
             )
             threading.Thread(target=self._icon.run,
                              name="SystemTray", daemon=True).start()
-        except Exception:
-            pass   # pystray/PIL optional
+        except Exception as exc:
+            logger.error("System tray icon failed: %s", exc, exc_info=True)
 
     def stop(self) -> None:
         if self._icon:
             try:
                 self._icon.stop()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.error("System tray icon failed: %s", exc, exc_info=True)
 
 
 # ---------------------------------------------------------------------------

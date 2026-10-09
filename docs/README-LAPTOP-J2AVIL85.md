@@ -13,7 +13,7 @@
 
 ### 🧠 Multi-Modal Behavioral Biometrics (Keyboard + Mouse)
 - **Mouse Movement & Click Dynamics Tracking** — Trajectory curvature, micro-tremors/jitter, velocity, acceleration, click hold time, double-click intervals, and 3x3 screen quadrant heatmaps.
-- **Combined Keyboard + Mouse Fusion Scoring** — Elevates detection accuracy from 70–80% (keyboard alone) to **90–95%** with weighted fusion ($0.40 \text{ KB} + 0.40 \text{ Mouse} + 0.20 \text{ Pattern}$).
+- **Combined Keyboard + Mouse Fusion Scoring** — Elevates detection accuracy from 70–80% (design target based on internal thresholds, not yet validated against a labeled real-world test set) (keyboard alone) to **90–95%** (design target based on internal thresholds, not yet validated against a labeled real-world test set) with weighted fusion ($0.40 \text{ KB} + 0.40 \text{ Mouse} + 0.20 \text{ Pattern}$).
 - **Multi-Modal Bot Detection** — Classifies automation into 4 distinct bot signatures:
   1. *Keyboard Macro* (`keyboard_macro` — mechanical typing without mouse)
   2. *Remote Control* (`remote_control` — straight geometric cursor paths)
@@ -345,6 +345,25 @@ ProcessMonitor → FeatureExtractor → KeyloggerClassifier
 
 ### Database Schema
 
+The system uses SQLite with **8 tables** organized into three functional groups:
+
+**Core Detection (4 tables):**
+- `detections` — main detection classification log
+- `actions` — user response tracking (terminate/quarantine/whitelist/dismiss)
+- `feature_vectors` — ML feature vectors per detection
+- `process_snapshots` — rolling audit log (OFF by default, enabled via `--log-snapshots`)
+
+**Behavioral Biometrics (3 tables):**
+- `typing_behavior` — keyboard timing baselines
+- `mouse_behavior` — mouse movement baselines  
+- `behavioral_alerts` — behavioral anomaly alerts
+
+**Training Data (1 table):**
+- `behavior_recordings` — user-labeled safe process samples for model training
+
+<details>
+<summary><strong>Click to view simplified schema example (3 core tables)</strong></summary>
+
 ```sql
 -- Detections table
 CREATE TABLE detections (
@@ -389,6 +408,10 @@ CREATE TABLE process_snapshots (
     snapshot_time REAL
 );
 ```
+
+*Note: This shows 3 core tables. See `src/db_logger.py` for complete 8-table schema.*
+
+</details>
 
 ---
 

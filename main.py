@@ -350,6 +350,8 @@ def main() -> int:
         ctypes.windll.user32.MessageBoxW(
             0,
             "Keylogger Detector is already running.\n\n"
+            "Check your system tray (bottom-right of taskbar, click the ^ arrow to see hidden icons) "
+            "to access the running instance.\n\n"
             "Only one instance is allowed at a time to prevent database conflicts.",
             "Already Running",
             0x30,  # MB_ICONWARNING
