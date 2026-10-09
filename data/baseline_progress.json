@@ -1,5 +1,501 @@
 {
-  "keystrokes_recorded": 621,
-  "mouse_movements_recorded": 4657,
-  "last_saved": 1791519680.0119004
+  "keystrokes_recorded": 288,
+  "mouse_movements_recorded": 1404,
+  "last_saved": 1791534135.667195,
+  "kb_samples": [
+    {
+      "window_start": 139475.0941978,
+      "window_end": 139535.094198,
+      "keystroke_count": 45,
+      "wpm": 9.0,
+      "avg_dwell_ms": 210.02565217391304,
+      "avg_flight_ms": 414.372502564966,
+      "consistency_stddev": 323.29572970630505,
+      "burst_count": 4,
+      "avg_burst_length_secs": 2.848064300007536,
+      "is_sufficient": true
+    },
+    {
+      "window_start": 140927.2298986,
+      "window_end": 140987.2298989,
+      "keystroke_count": 6,
+      "wpm": 1.2,
+      "avg_dwell_ms": 480.05,
+      "avg_flight_ms": 337.9143999918597,
+      "consistency_stddev": 37.15549151651107,
+      "burst_count": 0,
+      "avg_burst_length_secs": 0.0,
+      "is_sufficient": true
+    },
+    {
+      "window_start": 140987.3268369,
+      "window_end": 141047.3268372,
+      "keystroke_count": 49,
+      "wpm": 9.8,
+      "avg_dwell_ms": 201.5469387755102,
+      "avg_flight_ms": 500.44930697659703,
+      "consistency_stddev": 430.496670163141,
+      "burst_count": 7,
+      "avg_burst_length_secs": 1.5201208714279346,
+      "is_sufficient": true
+    },
+    {
+      "window_start": 141047.5128116,
+      "window_end": 141107.5128118,
+      "keystroke_count": 24,
+      "wpm": 4.8,
+      "avg_dwell_ms": 292.031,
+      "avg_flight_ms": 648.502392856504,
+      "consistency_stddev": 467.5061671971634,
+      "burst_count": 5,
+      "avg_burst_length_secs": 0.9033936600026209,
+      "is_sufficient": true
+    },
+    {
+      "window_start": 141107.7131082,
+      "window_end": 141167.7131085,
+      "keystroke_count": 13,
+      "wpm": 2.6,
+      "avg_dwell_ms": 243.92416666666668,
+      "avg_flight_ms": 569.6855111099366,
+      "consistency_stddev": 317.82814124106255,
+      "burst_count": 2,
+      "avg_burst_length_secs": 2.0387008499965305,
+      "is_sufficient": true
+    },
+    {
+      "window_start": 141227.8625532,
+      "window_end": 141287.8625534,
+      "keystroke_count": 42,
+      "wpm": 8.4,
+      "avg_dwell_ms": 236.26809523809524,
+      "avg_flight_ms": 453.4738147057771,
+      "consistency_stddev": 415.60653758745883,
+      "burst_count": 5,
+      "avg_burst_length_secs": 1.9933673599909525,
+      "is_sufficient": true
+    },
+    {
+      "window_start": 141288.1890775,
+      "window_end": 141348.1890777,
+      "keystroke_count": 49,
+      "wpm": 9.8,
+      "avg_dwell_ms": 235.29,
+      "avg_flight_ms": 528.6772999992536,
+      "consistency_stddev": 411.1210681194807,
+      "burst_count": 6,
+      "avg_burst_length_secs": 2.0362928333343007,
+      "is_sufficient": true
+    },
+    {
+      "window_start": 141348.3584127,
+      "window_end": 141408.3584128,
+      "keystroke_count": 22,
+      "wpm": 4.4,
+      "avg_dwell_ms": 177.3575,
+      "avg_flight_ms": 472.25277222201436,
+      "consistency_stddev": 389.8502638565392,
+      "burst_count": 2,
+      "avg_burst_length_secs": 2.8710218999913195,
+      "is_sufficient": true
+    }
+  ],
+  "mouse_samples": [
+    {
+      "window_start": 139475.0965376,
+      "window_end": 139535.0965379,
+      "movement_count": 119,
+      "click_count": 3,
+      "scroll_count": 0,
+      "avg_speed_pxsec": 487.4874137931034,
+      "curvature_index": 1.28,
+      "micro_movements_per_sec": 0.6333333333333333,
+      "jitter_stddev_px": 24.0,
+      "avg_click_duration_ms": 144.32,
+      "avg_double_click_ms": 0.0,
+      "click_to_move_latency_ms": 190.69206666123742,
+      "pause_frequency_per_min": 3,
+      "acceleration_avg": 1051.2757142857142,
+      "screen_zones_3x3": [
+        [
+          5.9,
+          4.2,
+          16.0
+        ],
+        [
+          1.7,
+          14.3,
+          35.3
+        ],
+        [
+          0.0,
+          7.6,
+          15.1
+        ]
+      ],
+      "scroll_lines_per_scroll": 0.0,
+      "scroll_type": "continuous",
+      "scroll_to_click_delay_ms": 0.0,
+      "overshoot_frequency": 0.15,
+      "overshoot_distance_px": 8.0,
+      "approach_angle_deg": 45.0,
+      "left_right_click_ratio": 3.0,
+      "drag_speed_pxsec": 0.0,
+      "dominant_zone": "middle_right",
+      "idle_position": "lower_right_corner",
+      "is_sufficient": true
+    },
+    {
+      "window_start": 139700.5089648,
+      "window_end": 139760.5089649,
+      "movement_count": 220,
+      "click_count": 5,
+      "scroll_count": 0,
+      "avg_speed_pxsec": 549.5393457943925,
+      "curvature_index": 2.54,
+      "micro_movements_per_sec": 1.6833333333333333,
+      "jitter_stddev_px": 145.9,
+      "avg_click_duration_ms": 399.3075,
+      "avg_double_click_ms": 0.0,
+      "click_to_move_latency_ms": 192.01435999711975,
+      "pause_frequency_per_min": 10,
+      "acceleration_avg": 1536.7725316455696,
+      "screen_zones_3x3": [
+        [
+          2.7,
+          20.0,
+          6.8
+        ],
+        [
+          7.3,
+          7.7,
+          26.4
+        ],
+        [
+          18.2,
+          7.3,
+          3.6
+        ]
+      ],
+      "scroll_lines_per_scroll": 0.0,
+      "scroll_type": "continuous",
+      "scroll_to_click_delay_ms": 0.0,
+      "overshoot_frequency": 0.15,
+      "overshoot_distance_px": 8.0,
+      "approach_angle_deg": 45.0,
+      "left_right_click_ratio": 5.0,
+      "drag_speed_pxsec": 0.0,
+      "dominant_zone": "middle_right",
+      "idle_position": "lower_right_corner",
+      "is_sufficient": true
+    },
+    {
+      "window_start": 140927.2301335,
+      "window_end": 140987.2301338,
+      "movement_count": 231,
+      "click_count": 9,
+      "scroll_count": 0,
+      "avg_speed_pxsec": 378.0654672897196,
+      "curvature_index": 1.15,
+      "micro_movements_per_sec": 1.0,
+      "jitter_stddev_px": 7.47,
+      "avg_click_duration_ms": 277.31333333333333,
+      "avg_double_click_ms": 0.0,
+      "click_to_move_latency_ms": 323.60968889164116,
+      "pause_frequency_per_min": 10,
+      "acceleration_avg": 1346.400824742268,
+      "screen_zones_3x3": [
+        [
+          23.8,
+          22.1,
+          7.4
+        ],
+        [
+          5.2,
+          8.7,
+          23.4
+        ],
+        [
+          3.5,
+          0.4,
+          5.6
+        ]
+      ],
+      "scroll_lines_per_scroll": 0.0,
+      "scroll_type": "continuous",
+      "scroll_to_click_delay_ms": 0.0,
+      "overshoot_frequency": 0.15,
+      "overshoot_distance_px": 8.0,
+      "approach_angle_deg": 45.0,
+      "left_right_click_ratio": 9.0,
+      "drag_speed_pxsec": 0.0,
+      "dominant_zone": "top_left",
+      "idle_position": "lower_right_corner",
+      "is_sufficient": true
+    },
+    {
+      "window_start": 140987.3271661,
+      "window_end": 141047.3271664,
+      "movement_count": 76,
+      "click_count": 5,
+      "scroll_count": 0,
+      "avg_speed_pxsec": 566.4940277777778,
+      "curvature_index": 1.29,
+      "micro_movements_per_sec": 0.5833333333333334,
+      "jitter_stddev_px": 133.85,
+      "avg_click_duration_ms": 376.12,
+      "avg_double_click_ms": 0.0,
+      "click_to_move_latency_ms": 112.52093333556938,
+      "pause_frequency_per_min": 2,
+      "acceleration_avg": 1618.3925454545454,
+      "screen_zones_3x3": [
+        [
+          3.9,
+          27.6,
+          27.6
+        ],
+        [
+          0.0,
+          17.1,
+          1.3
+        ],
+        [
+          6.6,
+          15.8,
+          0.0
+        ]
+      ],
+      "scroll_lines_per_scroll": 0.0,
+      "scroll_type": "continuous",
+      "scroll_to_click_delay_ms": 0.0,
+      "overshoot_frequency": 0.15,
+      "overshoot_distance_px": 8.0,
+      "approach_angle_deg": 45.0,
+      "left_right_click_ratio": 5.0,
+      "drag_speed_pxsec": 0.0,
+      "dominant_zone": "top_center",
+      "idle_position": "lower_right_corner",
+      "is_sufficient": true
+    },
+    {
+      "window_start": 141047.5130287,
+      "window_end": 141107.5130289,
+      "movement_count": 234,
+      "click_count": 11,
+      "scroll_count": 0,
+      "avg_speed_pxsec": 426.8672222222222,
+      "curvature_index": 2.23,
+      "micro_movements_per_sec": 1.6333333333333333,
+      "jitter_stddev_px": 57.04,
+      "avg_click_duration_ms": 407.584,
+      "avg_double_click_ms": 152.22519999952056,
+      "click_to_move_latency_ms": 456.52185000362806,
+      "pause_frequency_per_min": 5,
+      "acceleration_avg": 1424.5528651685393,
+      "screen_zones_3x3": [
+        [
+          0.0,
+          6.0,
+          23.1
+        ],
+        [
+          0.4,
+          12.0,
+          12.8
+        ],
+        [
+          12.8,
+          7.7,
+          25.2
+        ]
+      ],
+      "scroll_lines_per_scroll": 0.0,
+      "scroll_type": "continuous",
+      "scroll_to_click_delay_ms": 0.0,
+      "overshoot_frequency": 0.15,
+      "overshoot_distance_px": 8.0,
+      "approach_angle_deg": 45.0,
+      "left_right_click_ratio": 11.0,
+      "drag_speed_pxsec": 0.0,
+      "dominant_zone": "bottom_right",
+      "idle_position": "lower_right_corner",
+      "is_sufficient": true
+    },
+    {
+      "window_start": 141167.7287492,
+      "window_end": 141227.7287493,
+      "movement_count": 119,
+      "click_count": 6,
+      "scroll_count": 0,
+      "avg_speed_pxsec": 560.6607619047619,
+      "curvature_index": 1.41,
+      "micro_movements_per_sec": 0.8166666666666667,
+      "jitter_stddev_px": 48.83,
+      "avg_click_duration_ms": 330.02166666666665,
+      "avg_double_click_ms": 152.14089999790303,
+      "click_to_move_latency_ms": 395.0501666695345,
+      "pause_frequency_per_min": 2,
+      "acceleration_avg": 1406.0253246753248,
+      "screen_zones_3x3": [
+        [
+          0.0,
+          0.0,
+          23.5
+        ],
+        [
+          0.8,
+          17.6,
+          24.4
+        ],
+        [
+          0.8,
+          23.5,
+          9.2
+        ]
+      ],
+      "scroll_lines_per_scroll": 0.0,
+      "scroll_type": "continuous",
+      "scroll_to_click_delay_ms": 0.0,
+      "overshoot_frequency": 0.15,
+      "overshoot_distance_px": 8.0,
+      "approach_angle_deg": 45.0,
+      "left_right_click_ratio": 6.0,
+      "drag_speed_pxsec": 0.0,
+      "dominant_zone": "middle_right",
+      "idle_position": "lower_right_corner",
+      "is_sufficient": true
+    },
+    {
+      "window_start": 141227.8628459,
+      "window_end": 141287.862846,
+      "movement_count": 112,
+      "click_count": 7,
+      "scroll_count": 0,
+      "avg_speed_pxsec": 356.12920792079206,
+      "curvature_index": 1.28,
+      "micro_movements_per_sec": 0.6166666666666667,
+      "jitter_stddev_px": 20.4,
+      "avg_click_duration_ms": 249.66500000000002,
+      "avg_double_click_ms": 201.22650000848807,
+      "click_to_move_latency_ms": 739.9723857233766,
+      "pause_frequency_per_min": 6,
+      "acceleration_avg": 1303.5523913043478,
+      "screen_zones_3x3": [
+        [
+          0.0,
+          25.9,
+          14.3
+        ],
+        [
+          5.4,
+          22.3,
+          11.6
+        ],
+        [
+          8.9,
+          8.0,
+          3.6
+        ]
+      ],
+      "scroll_lines_per_scroll": 0.0,
+      "scroll_type": "continuous",
+      "scroll_to_click_delay_ms": 0.0,
+      "overshoot_frequency": 0.15,
+      "overshoot_distance_px": 8.0,
+      "approach_angle_deg": 45.0,
+      "left_right_click_ratio": 7.0,
+      "drag_speed_pxsec": 0.0,
+      "dominant_zone": "top_center",
+      "idle_position": "lower_right_corner",
+      "is_sufficient": true
+    },
+    {
+      "window_start": 141288.1893763,
+      "window_end": 141348.1893764,
+      "movement_count": 80,
+      "click_count": 4,
+      "scroll_count": 0,
+      "avg_speed_pxsec": 306.35635135135135,
+      "curvature_index": 1.24,
+      "micro_movements_per_sec": 0.1,
+      "jitter_stddev_px": 16.1,
+      "avg_click_duration_ms": 287.04,
+      "avg_double_click_ms": 0.0,
+      "click_to_move_latency_ms": 394.90300000761636,
+      "pause_frequency_per_min": 3,
+      "acceleration_avg": 924.1562162162162,
+      "screen_zones_3x3": [
+        [
+          0.0,
+          16.2,
+          25.0
+        ],
+        [
+          1.2,
+          6.2,
+          13.8
+        ],
+        [
+          6.2,
+          8.8,
+          22.5
+        ]
+      ],
+      "scroll_lines_per_scroll": 0.0,
+      "scroll_type": "continuous",
+      "scroll_to_click_delay_ms": 0.0,
+      "overshoot_frequency": 0.15,
+      "overshoot_distance_px": 8.0,
+      "approach_angle_deg": 45.0,
+      "left_right_click_ratio": 4.0,
+      "drag_speed_pxsec": 0.0,
+      "dominant_zone": "top_right",
+      "idle_position": "lower_right_corner",
+      "is_sufficient": true
+    },
+    {
+      "window_start": 141348.358723,
+      "window_end": 141408.3587232,
+      "movement_count": 120,
+      "click_count": 1,
+      "scroll_count": 0,
+      "avg_speed_pxsec": 481.3190265486726,
+      "curvature_index": 1.19,
+      "micro_movements_per_sec": 0.6833333333333333,
+      "jitter_stddev_px": 16.18,
+      "avg_click_duration_ms": 1209.34,
+      "avg_double_click_ms": 0.0,
+      "click_to_move_latency_ms": 451.9183000084013,
+      "pause_frequency_per_min": 9,
+      "acceleration_avg": 1243.6640229885058,
+      "screen_zones_3x3": [
+        [
+          2.5,
+          0.0,
+          1.7
+        ],
+        [
+          6.7,
+          20.8,
+          13.3
+        ],
+        [
+          2.5,
+          2.5,
+          50.0
+        ]
+      ],
+      "scroll_lines_per_scroll": 0.0,
+      "scroll_type": "continuous",
+      "scroll_to_click_delay_ms": 0.0,
+      "overshoot_frequency": 0.15,
+      "overshoot_distance_px": 8.0,
+      "approach_angle_deg": 45.0,
+      "left_right_click_ratio": 1.0,
+      "drag_speed_pxsec": 0.0,
+      "dominant_zone": "bottom_right",
+      "idle_position": "lower_right_corner",
+      "is_sufficient": true
+    }
+  ]
 }

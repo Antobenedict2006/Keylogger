@@ -365,6 +365,18 @@ def main() -> int:
     loading.update_progress(15, "Setting up logging...")
     _setup_logging(args.log_level, args.log_file)
     _install_signal_handlers()
+    
+    # ------------------------------------------------------------------
+    # Request high-resolution Windows timer (1ms precision)
+    # ------------------------------------------------------------------
+    # Windows default timer resolution is ~15.6ms, which causes threading.Event.wait()
+    # and time.sleep() to have poor precision. This sets it to 1ms for the entire process,
+    # dramatically improving polling thread responsiveness.
+    try:
+        ctypes.windll.winmm.timeBeginPeriod(1)
+        logger.debug("High-resolution timer enabled (1ms precision).")
+    except Exception as exc:
+        logger.warning("Could not set high-resolution timer: %s", exc)
 
     logger.info("=" * 60)
     logger.info("  AI-Based Keylogger Detection System  starting up")
@@ -519,6 +531,14 @@ def main() -> int:
     # 7. Shutdown
     # ------------------------------------------------------------------
     logger.info("Shutting down…")
+    
+    # Release high-resolution timer
+    try:
+        ctypes.windll.winmm.timeEndPeriod(1)
+        logger.debug("High-resolution timer released.")
+    except Exception:
+        pass
+    
     try:
         monitor.stop()
     except Exception:
