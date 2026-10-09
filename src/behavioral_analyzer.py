@@ -53,8 +53,13 @@ logger = logging.getLogger(__name__)
 
 BUFFER_MAXLEN_KB        = 10_000         # circular buffer size for keystrokes
 BUFFER_MAXLEN_MOUSE     = 50_000         # circular buffer size for mouse events
-MIN_TRAINING_KS         = 2_000          # keystrokes needed for baseline
-MIN_TRAINING_MOUSE      = 3_000          # mouse movements needed for baseline
+
+# Demo-mode override via environment variables — production defaults are 2000/3000.
+# Lower values allow fast baseline calibration for live demonstrations; this does NOT
+# change the underlying anomaly detection math, only the number of samples required
+# before the baseline is marked complete.
+MIN_TRAINING_KS         = int(os.environ.get("KGAI_BASELINE_KEYSTROKES", "2000"))
+MIN_TRAINING_MOUSE      = int(os.environ.get("KGAI_BASELINE_MOUSE", "3000"))
 ANALYSIS_WINDOW_SECS    = 60             # seconds per analysis cycle
 MIN_KS_FOR_ANALYSIS     = 5              # minimum keystrokes needed to analyse (LOWERED FOR FASTER COLLECTION)
 MIN_MOUSE_FOR_ANALYSIS  = 5              # minimum mouse movements to analyse (LOWERED FOR FASTER COLLECTION)
@@ -70,6 +75,10 @@ BOT_MAX_WPM           = 120    # WPM sustained = superhuman
 BOT_BURST_SECS        = 60     # single continuous burst > 60s
 BOT_MIN_CURVATURE     = 1.05   # curvature < 1.05 = straight geometric paths
 BOT_MIN_JITTER        = 1.0    # jitter < 1.0px = no natural hand tremor
+
+# Debug flag for polling loop instrumentation (off by default)
+# Set environment variable KGAI_DEBUG_POLLING=1 to enable detailed polling statistics
+DEBUG_POLLING = os.environ.get("KGAI_DEBUG_POLLING", "0") == "1"
 
 from src.paths import get_data_path, get_user_data_root
 
@@ -316,10 +325,45 @@ class KeystrokeRecorder:
     # and flight time measurements without detectable CPU overhead.
     POLL_INTERVAL_S: float = 0.004   # 4 ms → 250 Hz
 
-    # Virtual key codes to monitor.  We track the full printable + modifier
-    # range (8–254) to capture all typing activity without interpreting
-    # characters.  VK 0-7 are reserved / unused in practice.
-    _VK_RANGE: range = range(8, 255)
+    # Virtual key codes to monitor.  Reduced from full range (8-254) to only keys
+    # relevant for typing biometrics to minimize GIL contention from 247 ctypes
+    # calls per cycle down to ~60 calls.
+    _VK_RANGE: tuple = (
+        # Letters A-Z
+        *range(0x41, 0x5B),  # A-Z (0x41-0x5A)
+        # Digits 0-9
+        *range(0x30, 0x3A),  # 0-9 (0x30-0x39)
+        # Whitespace & navigation
+        0x20,  # Space
+        0x0D,  # Enter
+        0x09,  # Tab
+        0x08,  # Backspace
+        0x1B,  # Escape
+        # Arrow keys
+        0x25, 0x26, 0x27, 0x28,  # Left, Up, Right, Down
+        # Modifiers
+        0x10, 0x11, 0x12,  # Shift, Ctrl, Alt
+        0xA0, 0xA1,  # Left Shift, Right Shift
+        0xA2, 0xA3,  # Left Ctrl, Right Ctrl
+        0xA4, 0xA5,  # Left Alt, Right Alt
+        # Common editing
+        0x2E, 0x2D,  # Delete, Insert
+        0x21, 0x22, 0x23, 0x24,  # Page Up, Page Down, End, Home
+        # Common punctuation (OEM keys vary by keyboard layout but these are standard)
+        0xBA,  # OEM_1 (;:)
+        0xBB,  # OEM_PLUS (=+)
+        0xBC,  # OEM_COMMA (,<)
+        0xBD,  # OEM_MINUS (-_)
+        0xBE,  # OEM_PERIOD (.>)
+        0xBF,  # OEM_2 (/?)
+        0xC0,  # OEM_3 (`~)
+        0xDB,  # OEM_4 ([{)
+        0xDC,  # OEM_5 (\|)
+        0xDD,  # OEM_6 (]})
+        0xDE,  # OEM_7 ('")
+        # Caps Lock (affects typing rhythm)
+        0x14,
+    )
 
     def __init__(self, buffer_maxlen: int = BUFFER_MAXLEN_KB) -> None:
         self._buffer: deque[KeystrokeEvent] = deque(maxlen=buffer_maxlen)
@@ -418,12 +462,46 @@ class KeystrokeRecorder:
         import ctypes
         user32 = ctypes.windll.user32
         GetAsyncKeyState = user32.GetAsyncKeyState
+        
+        # Elevate this thread's priority to time-critical to reduce GIL wait time
+        THREAD_PRIORITY_TIME_CRITICAL = 15
+        try:
+            handle = ctypes.windll.kernel32.GetCurrentThread()
+            ctypes.windll.kernel32.SetThreadPriority(handle, THREAD_PRIORITY_TIME_CRITICAL)
+            logger.debug("Keystroke polling thread priority elevated to TIME_CRITICAL.")
+        except Exception as exc:
+            logger.warning("Could not elevate keystroke polling thread priority: %s", exc)
 
         # Initialise all key states to "up" to avoid false press events on start.
         prev_states: Dict[int, bool] = {vk: False for vk in self._VK_RANGE}
+        
+        # DEBUG: Track loop timing statistics (aggregated, reported once per second)
+        # Only active when DEBUG_POLLING environment variable is set
+        if DEBUG_POLLING:
+            prev_loop_start: Optional[float] = None
+            cycle_count = 0
+            slow_cycle_count = 0
+            max_cycle_ms = 0.0
+            total_cycle_ms = 0.0
+            slow_scan_count = 0
+            max_scan_ms = 0.0
+            total_scan_ms = 0.0
+            last_report_time = time.perf_counter()
 
         while self._poller_running:
             t0 = time.perf_counter()
+            
+            # Accumulate cycle timing statistics (DEBUG only)
+            if DEBUG_POLLING:
+                if prev_loop_start is not None:
+                    actual_interval_ms = (t0 - prev_loop_start) * 1000.0
+                    expected_ms = self.POLL_INTERVAL_S * 1000.0
+                    cycle_count += 1
+                    if actual_interval_ms > (2.0 * expected_ms):
+                        slow_cycle_count += 1
+                    max_cycle_ms = max(max_cycle_ms, actual_interval_ms)
+                    total_cycle_ms += actual_interval_ms
+                prev_loop_start = t0
 
             # --- Hot path: scan all VKs for state changes ---
             # This loop typically completes in < 0.1 ms on a modern CPU.
@@ -456,6 +534,12 @@ class KeystrokeRecorder:
                                 duration_ms=0.0,
                             ))
                             self._total_recorded += 1
+                            # DEBUG: Log every key press for counting verification
+                            if DEBUG_POLLING:
+                                logger.info(
+                                    "KEY_PRESS: vk=%d counter=%d t=%.6f",
+                                    vk, self._total_recorded, ts
+                                )
                         else:
                             press_ts = self._press_times.pop(vk, None)
                             dwell_ms = (ts - press_ts) * 1000.0 if press_ts else 0.0
@@ -468,6 +552,34 @@ class KeystrokeRecorder:
 
             # --- Precise sleep for remainder of polling interval ---
             elapsed = time.perf_counter() - t0
+            
+            # Accumulate scan timing statistics and report (DEBUG only)
+            if DEBUG_POLLING:
+                elapsed_ms = elapsed * 1000.0
+                if elapsed > 0.010:  # more than 10ms just for the scan itself
+                    slow_scan_count += 1
+                max_scan_ms = max(max_scan_ms, elapsed_ms)
+                total_scan_ms += elapsed_ms
+                
+                # Report aggregated statistics once per second
+                now = time.perf_counter()
+                if now - last_report_time >= 1.0:
+                    if cycle_count > 0:
+                        logger.info(
+                            "POLL_STATS (last 1s): cycles=%d slow_cycles=%d avg_cycle_ms=%.2f max_cycle_ms=%.2f "
+                            "slow_scans=%d avg_scan_ms=%.2f max_scan_ms=%.2f",
+                            cycle_count, slow_cycle_count, total_cycle_ms / cycle_count, max_cycle_ms,
+                            slow_scan_count, total_scan_ms / cycle_count, max_scan_ms
+                        )
+                    cycle_count = 0
+                    slow_cycle_count = 0
+                    max_cycle_ms = 0.0
+                    total_cycle_ms = 0.0
+                    slow_scan_count = 0
+                    max_scan_ms = 0.0
+                    total_scan_ms = 0.0
+                    last_report_time = now
+            
             sleep_s = max(0.001, self.POLL_INTERVAL_S - elapsed)
             self._wake_event.wait(timeout=sleep_s)
 
@@ -744,6 +856,15 @@ class MouseRecorder:
 
         user32 = ctypes.windll.user32
         pt = wintypes.POINT()
+        
+        # Elevate this thread's priority to time-critical to reduce GIL wait time
+        THREAD_PRIORITY_TIME_CRITICAL = 15
+        try:
+            handle = ctypes.windll.kernel32.GetCurrentThread()
+            ctypes.windll.kernel32.SetThreadPriority(handle, THREAD_PRIORITY_TIME_CRITICAL)
+            logger.debug("Mouse polling thread priority elevated to TIME_CRITICAL.")
+        except Exception as exc:
+            logger.warning("Could not elevate mouse polling thread priority: %s", exc)
 
         VK_LBUTTON = 0x01
         VK_RBUTTON = 0x02
@@ -2402,15 +2523,35 @@ class BehavioralAnalysisEngine:
 
     def delete_training_data(self) -> None:
         self._learner.delete_baselines()
+        
+        # Reset counters to 0 for fresh training
+        self._kb_recorder._total_recorded = 0
+        self._mouse_recorder._total_movements = 0
+        
+        # Delete progress file so training starts fresh
+        self._delete_progress()
+        
+        # Reset progress tracking state
+        self._last_progress_save = 0.0
+        self._last_keystroke_count = 0
+        
+        # Reset training start time in learner
+        self._learner._training_start = time.time()
+        
+        # Clear current metrics and history
         self.current_metrics = None
         self.current_mouse_metrics = None
         self.current_anomaly = None
         self.recent_history.clear()
+        
+        # Clear database samples
         if self._db_store:
             try:
                 self._db_store.delete_all_samples()
             except Exception:
                 pass
+        
+        logger.info("Training data deleted - baseline reset to 0, starting fresh collection.")
 
     def save_my_behavior_snapshot(self) -> Optional[Dict]:
         """Save confirmed snapshot to data/my_behavior.json."""

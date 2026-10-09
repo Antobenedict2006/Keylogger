@@ -1,6 +1,11 @@
 """Quick script to check behavioral training data"""
 import sqlite3
+import os
 from pathlib import Path
+
+# Get thresholds from environment (same as main app)
+MIN_TRAINING_KS = int(os.environ.get("KGAI_BASELINE_KEYSTROKES", "2000"))
+MIN_TRAINING_MOUSE = int(os.environ.get("KGAI_BASELINE_MOUSE", "3000"))
 
 # Find database
 db_paths = [
@@ -39,7 +44,7 @@ if 'typing_keystrokes' in tables:
     cursor.execute('SELECT COUNT(*) FROM typing_keystrokes')
     ks_count = cursor.fetchone()[0]
     print(f"✅ Keystrokes recorded: {ks_count:,}")
-    print(f"   Progress: {(ks_count/2000)*100:.1f}% (need 2,000)")
+    print(f"   Progress: {(ks_count/MIN_TRAINING_KS)*100:.1f}% (need {MIN_TRAINING_KS:,})")
 else:
     print("❌ typing_keystrokes table not found")
     print("   The behavioral engine may not have started properly")
@@ -52,7 +57,7 @@ if 'typing_mouse_events' in tables:
     cursor.execute('SELECT COUNT(*) FROM typing_mouse_events')
     mouse_count = cursor.fetchone()[0]
     print(f"✅ Mouse events recorded: {mouse_count:,}")
-    print(f"   Progress: {(mouse_count/3000)*100:.1f}% (need 3,000)")
+    print(f"   Progress: {(mouse_count/MIN_TRAINING_MOUSE)*100:.1f}% (need {MIN_TRAINING_MOUSE:,})")
 else:
     print("❌ typing_mouse_events table not found")
     print("   The behavioral engine may not have started properly")
@@ -62,7 +67,7 @@ print()
 print("=" * 60)
 
 # Check if threshold reached
-if ks_count >= 2000 and mouse_count >= 3000:
+if ks_count >= MIN_TRAINING_KS and mouse_count >= MIN_TRAINING_MOUSE:
     print("🎉 TRAINING COMPLETE!")
     print("   Baseline should be saved automatically")
     print()
@@ -88,8 +93,8 @@ elif ks_count == 0 and mouse_count == 0:
 else:
     print("⏳ Still collecting data...")
     print()
-    remaining_ks = max(0, 2000 - ks_count)
-    remaining_mouse = max(0, 3000 - mouse_count)
+    remaining_ks = max(0, MIN_TRAINING_KS - ks_count)
+    remaining_mouse = max(0, MIN_TRAINING_MOUSE - mouse_count)
     print(f"   Keystrokes remaining: {remaining_ks:,}")
     print(f"   Mouse movements remaining: {remaining_mouse:,}")
     print()

@@ -2059,8 +2059,8 @@ class _BehavioralAnalysisTab(ttk.Frame):
         grid = tk.Frame(self._training_frame, bg=C["surface"])
         grid.pack(fill=tk.X, pady=8)
 
-        self._train_ks_lbl     = self._stat_row(grid, 0, "Keystrokes Recorded:", "— / 10,000")
-        self._train_mouse_lbl  = self._stat_row(grid, 1, "Mouse Movements:", "— / 15,000")
+        self._train_ks_lbl     = self._stat_row(grid, 0, "Keystrokes Recorded:", "—")
+        self._train_mouse_lbl  = self._stat_row(grid, 1, "Mouse Movements:", "—")
         self._train_elapsed_lbl = self._stat_row(grid, 2, "Time Elapsed:", "—")
         self._train_eta_lbl    = self._stat_row(grid, 3, "Estimated Remaining:", "—")
         self._train_speed_lbl  = self._stat_row(grid, 4, "Current Speeds:", "—")
@@ -3007,8 +3007,9 @@ class _SystemTray:
                 "KeyloggerDetector", icon=img,
                 title="Keylogger Detector", menu=menu,
             )
-            threading.Thread(target=self._icon.run,
-                             name="SystemTray", daemon=True).start()
+            # Use run_detached() for Windows compatibility
+            # This ensures the icon appears in system tray overflow area
+            self._icon.run_detached()
         except Exception as exc:
             logger.error("System tray icon failed: %s", exc, exc_info=True)
 
