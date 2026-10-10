@@ -1,0 +1,12 @@
+# Ignore large installer file - use GitHub Releases or Git LFS instead
+public/*.exe
+
+# Node modules (if you ever add any dependencies)
+node_modules/
+
+# Vercel
+.vercel/
+
+# OS files
+.DS_Store
+Thumbs.db
