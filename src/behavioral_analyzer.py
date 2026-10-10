@@ -1509,6 +1509,7 @@ class MultiModalBaselineLearner:
     def is_baseline_available(self) -> bool:
         return (
             self._kb_baseline is not None and self._kb_baseline.is_complete()
+            and self._mouse_baseline is not None and self._mouse_baseline.is_complete()
         )
 
     def delete_baselines(self) -> None:
