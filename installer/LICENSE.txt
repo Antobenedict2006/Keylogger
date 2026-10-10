@@ -1,0 +1,46 @@
+AI KEYLOGGER DETECTION SYSTEM ("KeyGuard AI")
+TERMS OF USE AND DATA DISCLOSURE
+
+Please read before installing.
+
+WHAT THIS SOFTWARE DOES:
+This application scans processes running on your computer to detect behavior
+patterns associated with keyloggers (software that secretly records keystrokes).
+It uses a heuristic scoring engine, not a cloud service, and does not transmit
+any data off this computer.
+
+WHAT THIS SOFTWARE MONITORS:
+- All running processes on this system, checking for keyboard-hook-capable
+  behavior (a known keylogger technique).
+- Optionally, with your explicit action (the "Behavioral Analysis" tab), it can
+  learn the TIMING AND RHYTHM of your own keyboard and mouse use to detect if a
+  different person or an automated script is using your computer. This feature
+  never records which keys you press, your passwords, or any screen content --
+  only timing statistics (e.g., typing speed, pauses).
+
+WHAT THIS SOFTWARE DOES NOT DO:
+- It does not record keystroke content (what you type) at any time, for any
+  process, including itself.
+- It does not view or capture screen content.
+- It does not transmit data to any external server. All data is stored locally
+  in a SQLite database on this computer.
+
+DETECTION ACCURACY:
+This software uses rule-based heuristics and statistical analysis, not a
+trained machine-learning model, in this release. Detection results (SAFE,
+SUSPICIOUS, MALICIOUS) are estimates based on process behavior patterns and
+may include false positives or false negatives. Always use your own judgment
+before taking action (terminate/quarantine) on a flagged process.
+
+ADMINISTRATOR PRIVILEGES:
+This installer requires administrator privileges to install files to Program
+Files. The application itself does not force administrator elevation to run,
+but some detection capabilities are reduced without it.
+
+NO WARRANTY:
+This software is provided "as is" for educational and demonstration purposes,
+without warranty of any kind. The authors are not liable for any damages
+arising from its use.
+
+By clicking "I Accept" / continuing installation, you acknowledge you have
+read and understood this disclosure.
