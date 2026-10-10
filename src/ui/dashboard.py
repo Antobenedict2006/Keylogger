@@ -2034,7 +2034,7 @@ class _BehavioralAnalysisTab(ttk.Frame):
 
         tk.Label(self._training_frame,
                  text="The AI passively learns your combined typing rhythm and mouse dynamics.\n"
-                      "Continue using your computer normally.",
+                      "App unlocks at 120 keystrokes + 200 mouse movements (~90 seconds).",
                  bg=C["surface"], fg=C["text_dim"],
                  font=("Segoe UI", 9), justify=tk.LEFT).pack(anchor="w", pady=(0, 12))
 

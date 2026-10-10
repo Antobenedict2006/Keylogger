@@ -54,12 +54,16 @@ logger = logging.getLogger(__name__)
 BUFFER_MAXLEN_KB        = 10_000         # circular buffer size for keystrokes
 BUFFER_MAXLEN_MOUSE     = 50_000         # circular buffer size for mouse events
 
-# Demo-mode override via environment variables — production defaults are 2000/3000.
-# Lower values allow fast baseline calibration for live demonstrations; this does NOT
-# change the underlying anomaly detection math, only the number of samples required
-# before the baseline is marked complete.
-MIN_TRAINING_KS         = int(os.environ.get("KGAI_BASELINE_KEYSTROKES", "2000"))
-MIN_TRAINING_MOUSE      = int(os.environ.get("KGAI_BASELINE_MOUSE", "3000"))
+# Two-tier baseline strategy:
+# - UI_UNLOCK threshold: minimum samples to unlock app and enable monitoring (fast demo experience)
+# - FULL_BASELINE threshold: continue collecting silently in background for full statistical confidence
+# Environment variables allow demo-mode override while keeping production-quality data collection.
+UI_UNLOCK_KS            = int(os.environ.get("KGAI_BASELINE_KEYSTROKES", "120"))
+UI_UNLOCK_MOUSE         = int(os.environ.get("KGAI_BASELINE_MOUSE", "200"))
+FULL_BASELINE_KS        = 2000      # Continue collecting to this threshold silently
+FULL_BASELINE_MOUSE     = 3000      # Continue collecting to this threshold silently
+MIN_TRAINING_KS         = UI_UNLOCK_KS          # Used for "is training complete" checks (UI unlock)
+MIN_TRAINING_MOUSE      = UI_UNLOCK_MOUSE       # Used for "is training complete" checks (UI unlock)
 ANALYSIS_WINDOW_SECS    = 60             # seconds per analysis cycle
 MIN_KS_FOR_ANALYSIS     = 5              # minimum keystrokes needed to analyse (LOWERED FOR FASTER COLLECTION)
 MIN_MOUSE_FOR_ANALYSIS  = 5              # minimum mouse movements to analyse (LOWERED FOR FASTER COLLECTION)
@@ -1409,7 +1413,12 @@ class MultiModalBaselineLearner:
             self._mouse_samples.append(m)
 
     def is_training_complete(self, total_ks: int, total_mouse: int) -> bool:
-        return total_ks >= self._min_ks and (total_mouse >= self._min_mouse or total_mouse >= 5000)
+        """Check if minimum UI unlock threshold is met (120/200 by default)."""
+        return total_ks >= self._min_ks and total_mouse >= self._min_mouse
+
+    def is_full_baseline_complete(self, total_ks: int, total_mouse: int) -> bool:
+        """Check if full statistical baseline threshold is met (2000/3000)."""
+        return total_ks >= FULL_BASELINE_KS and total_mouse >= FULL_BASELINE_MOUSE
 
     def compute_and_save_baselines(self, total_ks: int, total_mouse: int) -> Tuple[TypingBaseline, MouseBaseline]:
         now_iso = datetime.now().isoformat()
@@ -2756,7 +2765,8 @@ class BehavioralAnalysisEngine:
             except Exception as exc:
                 logger.debug("DB log error: %s", exc)
 
-        # Check training completion
+        # Check training completion (two-tier approach)
+        # Tier 1: UI unlock at 120/200 — save initial baseline, delete progress, enable monitoring
         if not self.is_baseline_available and self.is_training_complete:
             try:
                 self._learner.compute_and_save_baselines(self.total_keystrokes, self.total_mouse_movements)
@@ -2764,11 +2774,29 @@ class BehavioralAnalysisEngine:
                 self.export_keyboard_json()
                 self.export_mouse_json()
                 self.export_combined_profile_json()
-                # Delete progress file now that baseline is complete
+                # Delete progress file now that UI unlock threshold is met
                 self._delete_progress()
-                logger.info("Multi-modal baseline complete and exported.")
+                logger.info("Baseline UI unlock threshold met (%d/%d ks, %d/%d mouse). Monitoring enabled. Silent collection continues to %d/%d.",
+                           self.total_keystrokes, MIN_TRAINING_KS, self.total_mouse_movements, MIN_TRAINING_MOUSE,
+                           FULL_BASELINE_KS, FULL_BASELINE_MOUSE)
             except Exception as exc:
                 logger.error("Baseline computation error: %s", exc)
+        
+        # Tier 2: Full baseline at 2000/3000 — update baseline silently (no UI notification)
+        elif self.is_baseline_available and not self._learner.is_full_baseline_complete(self.total_keystrokes, self.total_mouse_movements):
+            # Silently update baseline every 100 keystrokes or 200 mouse movements
+            if (self.total_keystrokes % 100 == 0 and self.total_keystrokes > MIN_TRAINING_KS) or \
+               (self.total_mouse_movements % 200 == 0 and self.total_mouse_movements > MIN_TRAINING_MOUSE):
+                try:
+                    self._learner.compute_and_save_baselines(self.total_keystrokes, self.total_mouse_movements)
+                    self.export_keyboard_json()
+                    self.export_mouse_json()
+                    self.export_combined_profile_json()
+                    logger.debug("Silent baseline update: %d/%d ks, %d/%d mouse",
+                               self.total_keystrokes, FULL_BASELINE_KS,
+                               self.total_mouse_movements, FULL_BASELINE_MOUSE)
+                except Exception as exc:
+                    logger.debug("Silent baseline update error: %s", exc)
 
         # Anomaly detection
         anomaly = None
