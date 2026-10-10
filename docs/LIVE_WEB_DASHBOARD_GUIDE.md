@@ -96,7 +96,7 @@ Same table as the CSV upload view:
 │  │  ProcessMonitor (psutil)                               │ │
 │  │    ↓ every 5 seconds                                   │ │
 │  │  DetectionPipeline.on_snapshots()                      │ │
-│  │    → FeatureExtractor (24 features)                    │ │
+│  │    → FeatureExtractor (26 features)                    │ │
 │  │    → KeyloggerClassifier (ML model)                    │ │
 │  │    → [NEW] build_result_dict() for ALL processes      │ │
 │  │    → [NEW] update_scan_results() → Flask store        │ │

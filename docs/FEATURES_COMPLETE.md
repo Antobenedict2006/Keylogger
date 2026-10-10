@@ -92,7 +92,7 @@ Your AI Keylogger Detection System now has a **complete professional desktop app
 - Complete PyInstaller configuration
 - Automated build script (`build.ps1`)
 - Professional icon generator
-- Single-file .exe (~50-70 MB)
+- Single-file .exe (~80 MB)
 - No Python required to run
 
 ### 9. Complete Documentation ✅

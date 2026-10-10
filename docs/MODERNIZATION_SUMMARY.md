@@ -247,8 +247,8 @@ pyinstaller==6.3.0
 **File:** `dist/KeyloggerDetector.exe`
 
 **Size:**
-- Without UPX: 80-100 MB
-- With UPX: 50-70 MB
+- Without UPX compression: larger (exact size not benchmarked in this release)
+- With UPX: ~80 MB (confirmed via actual build)
 - With UPX + excludes: 40-60 MB
 
 **Includes:**
@@ -398,7 +398,7 @@ KeyloggerDetector/
 - No CSS-like animations (instant state changes only)
 
 ### Technical
-- Executable size is large (50-80 MB) due to bundled Python + ML libs
+- Executable size is large (~80 MB) due to bundled Python + ML libs
 - First-run may trigger Windows SmartScreen (unsigned executable)
 - Antivirus may flag as suspicious (PyInstaller false positive)
 - UPX compression requires separate download
@@ -542,7 +542,7 @@ The application is now ready for distribution as a standalone Windows executable
 **Lines of code changed:** ~500
 **New files created:** 5
 **Build time:** ~2-3 minutes
-**Executable size:** ~50-70 MB (with UPX)
+**Executable size:** ~80 MB (with UPX)
 
 ---
 

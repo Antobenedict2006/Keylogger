@@ -713,11 +713,23 @@ def _is_system_process(proc: psutil.Process) -> bool:
     try:
         username = proc.username() or ""
         exe = (proc.exe() or "").lower()
-        if "system32" in exe or "syswow64" in exe:
+        if (
+            "system32" in exe
+            or "syswow64" in exe
+            or "\\windows\\systemapps\\" in exe
+            or "\\windows\\winsxs\\" in exe
+        ):
             return True
         if any(s in username.upper() for s in ("SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE")):
             return True
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
+    except psutil.AccessDenied:
+        # Access denied when querying from an elevated context is a strong
+        # signal that this is a protected OS process (e.g. a SYSTEM-session
+        # svchost that blocks user-mode inspection).
+        return True
+    except psutil.NoSuchProcess:
+        # Process exited between enumeration and this call — not a system
+        # process signal, just a race condition.
         pass
     return False
 

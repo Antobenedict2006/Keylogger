@@ -607,7 +607,7 @@ class BehaviorRecordingStore:
         ----------
         session_id   : UUID string identifying the recording session.
         process_data : dict with keys: name, pid, exe_path, parent_name.
-        features     : {feature_name: value} for all 24 pipeline features.
+        features     : {feature_name: value} for all 26 pipeline features.
         label        : always "safe" for user-launched processes.
         """
         self._db._execute(

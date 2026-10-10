@@ -285,7 +285,7 @@ python create_icon.py
 pyinstaller keylogger_detector.spec
 
 # 3. Find output
-# dist\KeyloggerDetector.exe (~50-70 MB)
+# dist\KeyloggerDetector.exe (~80 MB)
 ```
 
 ### Build Output
@@ -479,7 +479,7 @@ python test_ui.py
 - **[QUICK_START.md](QUICK_START.md)** - Getting started guide
 - **[BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md)** - Detailed build guide
 - **[MODERNIZATION_SUMMARY.md](MODERNIZATION_SUMMARY.md)** - UI changes documentation
-- **[Prism documents/](Prism%20documents/)** - Design documents (PRISM framework)
+- **[PRISM/](PRISM/)** - Design documents (PRISM framework)
 
 ---
 
@@ -525,7 +525,7 @@ python test_ui.py
   - Distribute source code for technical users
 
 ### Large Executable Size
-- **Issue:** 50-70 MB file size
+- **Issue:** ~80 MB file size
 - **Cause:** Bundled Python + ML libraries
 - **Optimization:** Use UPX compression (already enabled)
 

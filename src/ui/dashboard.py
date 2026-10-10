@@ -892,7 +892,7 @@ class RecordingManager:
     - Take a baseline snapshot of running processes when recording starts.
     - Poll for new user-launched processes every POLL_INTERVAL seconds on a
       background thread.
-    - For each new process that passes the filter, extract its 24 features
+    - For each new process that passes the filter, extract its 26 features
       via the pipeline's FeatureExtractor and store the row in the DB.
     - Export everything to a timestamped CSV when recording stops.
     - Provide live counters consumed by the UI (thread-safe via a lock).
@@ -1322,10 +1322,11 @@ class _TrainModelTab(ttk.Frame):
             ("3", "Everything you launch is labelled 'safe' automatically — no manual "
                   "labelling needed."),
             ("4", "Click Stop Recording when done — a CSV file is saved automatically."),
-            ("5", "Click Train Personalized Model — the system mixes your real data "
-                  "with synthetic malicious samples and trains in ~30–60 seconds."),
-            ("6", "The detector immediately switches to your personalized model, "
-                  "reducing false positives by an estimated 80–90% (not yet independently validated)."),
+            ("5", "Click Train Personalized Model — your recorded data is saved "
+                  "for future model development."),
+            ("6", "In this release, live process detection uses our calibrated heuristic engine "
+                  "rather than a trained ML model. Your recorded data is preserved and will be used "
+                  "for model training in a future release. See KNOWN_LIMITATIONS.md for details."),
         ]
         for num, text in steps:
             row = tk.Frame(card, bg=C["surface"])
@@ -3794,10 +3795,14 @@ class Dashboard:
                 font=("Segoe UI", 10)).pack(pady=(4, 16))
         
         # Description
-        desc = ("Real-time keylogger detection powered by machine learning.\n\n"
+        desc = ("Real-time keylogger detection using a heuristic scoring engine and behavioral biometrics.\n\n"
+                "What this app monitors:\n"
+                "• Scans ALL running processes on this system for keyboard-hook-capable behavior (a known keylogger technique)\n"
+                "• Does NOT record what you type — only timing/rhythm patterns of YOUR OWN keyboard and mouse use, if you opt into Behavioral Analysis\n"
+                "• Cannot see screen content, passwords, or message contents\n\n"
                 "Features:\n"
-                "• ML-based threat classification\n"
-                "• Real-time process monitoring\n"
+                "• Heuristic-based threat scoring (see Behavior tab for biometric details)\n"
+                "• Real-time system-wide process monitoring\n"
                 "• Interactive statistics dashboard\n"
                 "• Desktop notifications\n"
                 "• Complete audit trail")

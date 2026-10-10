@@ -88,6 +88,12 @@ Behavioral (keystroke dynamics) analysis has not been validated on non-QWERTY ke
 
 ---
 
+## 15. ML-Based Process Classification Not Used in This Release
+
+An initial trained ML classifier (gradient boosting) was developed for process-level detection. Internal testing revealed two issues: (1) the model was trained on synthetic data with unrealistic class distributions — for example, assuming legitimate processes rarely load standard Windows UI APIs (user32.dll), when in reality this is extremely common — and (2) a scikit-learn version mismatch between training and runtime environments with no compatibility validation performed. Together these caused the model to misclassify well-known safe processes (including core Windows system processes) as malicious with high confidence. This submission therefore uses a calibrated heuristic scoring engine as the primary detection method for process classification, which performed more reliably in real testing. Retraining the ML classifier on real, properly balanced, version-validated data is planned future work. Behavioral biometrics (keystroke/mouse anomaly detection) is unaffected by this limitation — it uses a separate, independently verified statistical (z-score) method, not this ML classifier.
+
+---
+
 ## Summary
 
 These limitations are documented transparently as part of the project's honest assessment of its current state. Many of them represent conscious design tradeoffs (e.g., polling vs. hooking, no autostart), while others (e.g., thread contention, lack of external validation) are areas for potential future improvement. The system is functional and demonstrates the core behavioral biometrics and anomaly detection approach, but it is not production-hardened for enterprise deployment without addressing these constraints.

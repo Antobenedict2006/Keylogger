@@ -108,7 +108,7 @@ python create_icon.py
 pyinstaller keylogger_detector.spec
 ```
 
-Output: `dist\KeyloggerDetector.exe` (~50-70 MB)
+Output: `dist\KeyloggerDetector.exe` (~80 MB)
 
 ### For Running from Source
 
@@ -185,7 +185,7 @@ exe = EXE(
 
 **Expected output:**
 - File: `KeyloggerDetector.exe`
-- Size: 50-70 MB (with UPX)
+- Size: ~80 MB (with UPX)
 - Includes: Python + all dependencies + ML model
 - Requires: No Python installation on target PC
 
@@ -221,7 +221,7 @@ python test_ui.py
 
 # 2. Check output
 # [ ] dist\KeyloggerDetector.exe exists
-# [ ] File size is reasonable (50-80 MB)
+# [ ] File size is reasonable (~80 MB)
 # [ ] No errors in build log
 
 # 3. Test executable
@@ -454,7 +454,7 @@ def switch_to_history_with_filter(filter_value: str):
 - Platform-specific font rendering
 
 ### PyInstaller Constraints
-- Large file size (50-70 MB minimum)
+- Large file size (~80 MB minimum)
 - Some antivirus false positives
 - Windows Defender SmartScreen warnings (unsigned)
 - Cannot use relative imports in frozen state

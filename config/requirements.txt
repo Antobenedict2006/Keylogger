@@ -1,12 +1,12 @@
-psutil==5.9.8
-pywin32==306
-scikit-learn==1.4.2
-pandas==2.2.2
-numpy==1.26.4
-joblib==1.4.2
+psutil==7.2.2
+pywin32==312
+scikit-learn==1.9.1
+pandas==3.0.6
+numpy==2.5.3
+joblib==1.6.0
 plyer==2.1.0
 pystray==0.19.5
-Pillow==10.3.0
-pyinstaller==6.3.0
-fpdf2>=2.7.0          # PDF export (Feature 6)
-pynput==1.7.6         # Behavioral typing analysis (Phase 1)
+Pillow==12.3.0
+pyinstaller==6.22.3
+fpdf2==2.8.8          # PDF export (Feature 6)
+pynput==1.8.2         # Behavioral typing analysis (Phase 1)

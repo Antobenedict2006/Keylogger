@@ -58,6 +58,11 @@ logger = logging.getLogger(__name__)
 
 from .paths import DEFAULT_MODEL_PATH, DEFAULT_MODEL_PATH_PERSONALIZED
 
+# ML model disabled for this release — trained on synthetic data with
+# unrealistic class distributions and a scikit-learn version mismatch;
+# see KNOWN_LIMITATIONS.md. Heuristic scorer is the primary engine.
+FORCE_HEURISTIC_ONLY = True
+
 # Personalized model path — written by the Train-Model tab after the user
 # records their own behavior and trains a personalized classifier.
 # If this file exists it takes priority over the generic model above.
@@ -172,7 +177,7 @@ def _heuristic_score(features: np.ndarray) -> float:
     if features[_IDX["has_visible_window"]] > 0:
         score -= 0.10
     if features[_IDX["is_signed"]] > 0:
-        score -= 0.10
+        score -= 0.25
 
     return float(np.clip(score, 0.0, 1.0))
 
@@ -229,6 +234,15 @@ class KeyloggerClassifier:
 
         Returns True on success, False if neither file exists.
         """
+        # ML model disabled for this release — trained on synthetic data with
+        # unrealistic class distributions and a scikit-learn version mismatch;
+        # see KNOWN_LIMITATIONS.md. Heuristic scorer is the primary engine.
+        if FORCE_HEURISTIC_ONLY:
+            logger.info(
+                "ML model loading disabled (FORCE_HEURISTIC_ONLY=True) — using heuristic scorer only."
+            )
+            return False
+        
         # Try personalized first
         if self._personalized_path.exists():
             ok = self._try_load(self._personalized_path, personalized=True)

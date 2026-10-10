@@ -58,8 +58,11 @@ a = Analysis(
         'joblib',
         'numpy',
         
-        # Process monitoring
+        # Process monitoring (with all submodules)
         'psutil',
+        'psutil._common',
+        'psutil._pswindows',
+        'psutil._psutil_windows',
         
         # UI dependencies
         'tkinter',
@@ -102,8 +105,6 @@ a = Analysis(
     excludes=[
         # Exclude heavy unused packages to reduce .exe size and build time
         'matplotlib',
-        'scipy',
-        'pandas',
         'IPython',
         'jupyter',
         'notebook',

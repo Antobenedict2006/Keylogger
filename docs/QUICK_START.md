@@ -225,7 +225,7 @@ python tools\train_model.py
 - ✅ Auto-filtering
 
 #### Standalone Executable
-- ✅ Single .exe file (~50-70 MB)
+- ✅ Single .exe file (~80 MB)
 - ✅ No Python required
 - ✅ Includes ML model
 - ✅ Professional icon

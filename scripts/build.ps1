@@ -13,6 +13,10 @@ $IconFile = Join-Path $ProjectRoot "assets\icon.ico"
 $DistDir = Join-Path $ProjectRoot "dist"
 $BuildDir = Join-Path $ProjectRoot "build"
 
+# Virtual environment paths
+$VenvPython = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+$VenvPip = Join-Path $ProjectRoot ".venv\Scripts\pip.exe"
+
 Write-Host ""
 Write-Host "AI Keylogger Detection System - Build Script" -ForegroundColor Blue
 Write-Host "=============================================" -ForegroundColor Blue
@@ -20,22 +24,22 @@ Write-Host ""
 
 # Check Python
 Write-Host "Checking Python..." -ForegroundColor Cyan
-$pythonVersion = python --version 2>&1
+$pythonVersion = & $VenvPython --version 2>&1
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "OK: $pythonVersion" -ForegroundColor Green
+    Write-Host "OK: $pythonVersion (venv)" -ForegroundColor Green
 } else {
-    Write-Host "ERROR: Python not found" -ForegroundColor Red
+    Write-Host "ERROR: Python not found in .venv" -ForegroundColor Red
     exit 1
 }
 
 # Check PyInstaller
 Write-Host "Checking PyInstaller..." -ForegroundColor Cyan
-$pyinstallerVersion = python -m PyInstaller --version 2>&1
+$pyinstallerVersion = & $VenvPython -m PyInstaller --version 2>&1
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "OK: PyInstaller $pyinstallerVersion" -ForegroundColor Green
+    Write-Host "OK: PyInstaller $pyinstallerVersion (venv)" -ForegroundColor Green
 } else {
     Write-Host "WARNING: PyInstaller not found, installing..." -ForegroundColor Yellow
-    pip install pyinstaller
+    & $VenvPip install pyinstaller
 }
 
 # Clean
@@ -71,7 +75,7 @@ Write-Host ""
 Set-Location $ProjectRoot
 
 # Run PyInstaller
-python -m PyInstaller $SpecFile --noconfirm
+& $VenvPython -m PyInstaller $SpecFile --noconfirm
 
 # Check result
 $ExePath = Join-Path $DistDir "$AppName.exe"
